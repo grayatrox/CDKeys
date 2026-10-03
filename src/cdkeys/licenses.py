@@ -145,6 +145,7 @@ def upsert_license(
     """
     product_id = get_or_create_product_id(con, product_name)
 
+    identity = norm(identity)
     product_key = norm(product_key)
     serial_number = norm(serial_number)
     assigned_device = norm(assigned_device)
@@ -166,11 +167,12 @@ def upsert_license(
         """
         INSERT INTO license (
             id, product_id, product_key, serial_number, assigned_device,
-            associated_login, notes, updated_utc
+            associated_login, notes, identity, updated_utc
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             product_id       = excluded.product_id,
+            identity         = COALESCE(excluded.identity, license.identity),
             product_key      = COALESCE(excluded.product_key, license.product_key),
             serial_number    = COALESCE(excluded.serial_number,
                                         license.serial_number),
@@ -189,6 +191,7 @@ def upsert_license(
             assigned_device,
             associated_login,
             notes,
+            identity,
             now(),
         ),
     )

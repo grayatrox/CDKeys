@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS license (
     assigned_device TEXT,
     associated_login TEXT,
     notes TEXT,
+    -- Manual identity override, kept so an edited licence can be re-hashed.
+    -- Added after the first release; see ensure_schema for older DBs.
+    identity TEXT,
 
     created_utc TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     updated_utc TEXT
@@ -112,5 +115,12 @@ def open_db(db_path: Path, passphrase: str, *, create: bool = False) -> DBConn:
 
 
 def ensure_schema(con: DBConn) -> None:
-    """Create the tables and indexes if they do not already exist."""
+    """Create the tables and indexes if missing, and migrate older databases.
+
+    CREATE TABLE IF NOT EXISTS never alters an existing table, so columns
+    added later are added here. Every migration is additive and nullable.
+    """
     con.executescript(SCHEMA_SQL)
+    columns = {row[1] for row in con.execute("PRAGMA table_info(license)").fetchall()}
+    if "identity" not in columns:
+        con.execute("ALTER TABLE license ADD COLUMN identity TEXT")
