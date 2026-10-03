@@ -16,6 +16,10 @@ dependencies = [
 [project.scripts]
 cdkeys = "cdkeys.cli:main"
 
+[project.gui-scripts]
+# No console window on Windows.
+cdkeys-gui = "cdkeys.gui:main"
+
 [dependency-groups]
 dev = [
     "mypy==2.3.1",

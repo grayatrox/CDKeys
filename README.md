@@ -24,12 +24,11 @@ updates the existing record instead of duplicating it. `assigned_device` and
 
 ## Install
 
-Requires Python 3.12 or newer (see `.python-version`). There is no separate
-install step: `launch.py` installs what it needs on first start.
-
-```powershell
-python launch.py --help
-```
+Requires Python 3.12 or newer from python.org (see `.python-version`). There
+is no separate install step: **double-click `CD Key Manager.pyw`**. No console
+window opens. The first start shows a small "Setting up CD Key Manager" window
+while it installs what it needs, then opens the key manager. If setup fails,
+a message box shows why, and the next start tries again.
 
 The first run creates `.venv` and installs the pinned runtime dependency
 (`requirements-runtime.lock`) and the package. Later runs skip this. It
@@ -45,11 +44,8 @@ python tasks.py setup
 
 ## Run
 
-**Key manager window:**
-
-```powershell
-python launch.py gui
-```
+**Key manager window:** double-click `CD Key Manager.pyw`. (Inside the venv
+it is also `cdkeys-gui`, which opens no console either.)
 
 On first start it asks whether to open an existing database or create a new
 one, and saves the choice to the settings file (see [Configure](#configure)).

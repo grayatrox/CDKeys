@@ -1,4 +1,5 @@
-from collections.abc import Sequence
+import sys
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
@@ -85,7 +86,7 @@ def test_failed_step_leaves_no_stamp_so_next_start_retries(
     root = _project(tmp_path)
     venv, stamp = root / ".venv", root / ".venv" / "stamp"
 
-    with pytest.raises(SystemExit, match="will retry"):
+    with pytest.raises(launch.InstallError, match="will retry"):
         launch.install(root, venv, stamp, Recorder(fail_at=fail_at, venv=venv))
 
     assert not stamp.exists()
@@ -98,7 +99,7 @@ def test_stale_stamp_is_removed_before_reinstalling(tmp_path: Path) -> None:
     _fake_venv(venv)
     stamp.write_text("old\n")
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(launch.InstallError):
         launch.install(root, venv, stamp, Recorder(fail_at=0))
 
     assert not stamp.exists()
@@ -127,3 +128,131 @@ def test_main_runs_cdkeys_in_the_venv(
     run.cmds.clear()
     assert launch.main(["verify"], run) == 0
     assert run.cmds == [[str(launch.venv_python(venv)), "-m", "cdkeys", "verify"]]
+
+
+# --- double-click (GUI) start -------------------------------------------------
+
+
+def test_cli_reports_install_failure_and_exits_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _project(tmp_path)
+    monkeypatch.setattr(launch, "ROOT", root)
+    monkeypatch.setattr(launch, "VENV", root / ".venv")
+    monkeypatch.setattr(launch, "STAMP", root / ".venv" / "stamp")
+
+    assert launch.main(["verify"], Recorder(fail_at=1, venv=root / ".venv")) == 1
+    assert "will retry" in capsys.readouterr().err
+
+
+def test_quiet_runner_captures_output_and_exit_code() -> None:
+    log: list[str] = []
+    run = launch.quiet_runner(log)
+
+    rc = run([sys.executable, "-c", "print('hello'); import sys; sys.exit(3)"])
+
+    assert rc == 3
+    assert "hello" in "".join(log)
+
+
+def test_failure_message_includes_the_tail_of_the_log() -> None:
+    log = [f"line {i}\n" for i in range(50)]
+
+    message = launch.failure_message(launch.InstallError("pip failed"), log)
+
+    assert message.startswith("pip failed")
+    assert "line 49" in message
+    assert "line 10\n" not in message
+
+
+def test_app_command_uses_console_less_python(tmp_path: Path) -> None:
+    cmd = launch.app_command(tmp_path / ".venv")
+
+    assert cmd[1:] == ["-m", "cdkeys.gui"]
+    if sys.platform == "win32":
+        assert cmd[0].endswith("pythonw.exe")
+
+
+class GuiStart:
+    def __init__(self, setup_error: BaseException | None = None) -> None:
+        self.setup_error = setup_error
+        self.setup_ran = False
+        self.started: list[list[str]] = []
+        self.errors: list[str] = []
+
+    def run_setup(self, task: Callable[[], None]) -> BaseException | None:
+        self.setup_ran = True
+        if self.setup_error is None:
+            task()
+        return self.setup_error
+
+    def start(self, cmd: list[str]) -> None:
+        self.started.append(cmd)
+
+    def show_error(self, message: str) -> None:
+        self.errors.append(message)
+
+
+def _gui_main(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake: GuiStart, installed: bool
+) -> int:
+    root = _project(tmp_path)
+    venv = root / ".venv"
+    monkeypatch.setattr(launch, "ROOT", root)
+    monkeypatch.setattr(launch, "VENV", venv)
+    monkeypatch.setattr(launch, "STAMP", venv / "stamp")
+    if installed:
+        launch.install(root, venv, venv / "stamp", Recorder(venv=venv))
+    return launch.gui_main(
+        run_setup=fake.run_setup,
+        start_app=fake.start,
+        show_error=fake.show_error,
+        runner_factory=lambda _log: Recorder(venv=venv),
+    )
+
+
+def test_gui_start_when_installed_skips_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = GuiStart()
+
+    assert _gui_main(tmp_path, monkeypatch, fake, installed=True) == 0
+    assert not fake.setup_ran
+    assert fake.started == [launch.app_command(launch.VENV)]
+
+
+def test_gui_first_start_installs_with_progress_then_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = GuiStart()
+
+    assert _gui_main(tmp_path, monkeypatch, fake, installed=False) == 0
+    assert fake.setup_ran
+    assert fake.started == [launch.app_command(launch.VENV)]
+    assert not launch.needs_install(
+        launch.VENV, launch.STAMP, launch.expected_stamp(launch.ROOT)
+    )
+
+
+def test_gui_install_failure_is_shown_and_app_not_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = GuiStart(setup_error=launch.InstallError("pip failed"))
+
+    assert _gui_main(tmp_path, monkeypatch, fake, installed=False) == 1
+    assert fake.started == []
+    assert len(fake.errors) == 1
+    assert "pip failed" in fake.errors[0]
+
+
+def test_progress_window_runs_task_and_returns_its_error() -> None:
+    ran: list[bool] = []
+
+    assert launch.run_with_progress(lambda: ran.append(True)) is None
+    assert ran == [True]
+
+    def boom() -> None:
+        raise launch.InstallError("nope")
+
+    error = launch.run_with_progress(boom)
+    assert isinstance(error, launch.InstallError)
