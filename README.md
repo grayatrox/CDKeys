@@ -4,8 +4,10 @@ An encrypted store for software licence keys. Records live in a
 [SQLCipher](https://www.zetetic.net/sqlcipher/) database (an encrypted SQLite
 file), so the file is unreadable without its passphrase.
 
-It is a Python package (`src/cdkeys`) with one command and two subcommands:
+It is a Python package (`src/cdkeys`) with one command and three subcommands:
 
+- `cdkeys gui` opens a desktop key manager: browse, search, add, edit and
+  delete licences, and copy any field to the clipboard.
 - `cdkeys add` adds or updates licences from a JSON file.
 - `cdkeys verify` checks that the database opens, shows counts per product,
   flags product names that differ only by case, and confirms that plain SQLite
@@ -43,9 +45,32 @@ python tasks.py setup
 
 ## Run
 
-Point cdkeys at your database first (see [Configure](#configure)).
+**Key manager window:**
 
-**Add or update licences:**
+```powershell
+python launch.py gui
+```
+
+On first start it asks whether to open an existing database or create a new
+one, and saves the choice to the settings file (see [Configure](#configure)).
+It then asks for the passphrase; a new database asks for it twice.
+
+- **Search** filters as you type, across every field.
+- The table masks keys and serials down to their last four characters. The
+  details pane on the right shows the selected licence, with **Copy** beside
+  each field. Tick **Show key and serial** to reveal them there. The status bar
+  says what was copied, never the value.
+- **Add…** opens a form. **Edit…** (or double-click) changes the selected
+  licence; editing the product, key, serial, login or identity re-keys it.
+  **Delete** (or the Delete key) asks for confirmation first. Each change is
+  saved immediately.
+- A licence needs a product name plus a product key, serial number or login.
+  If it has none of those, give it an identity such as an invoice number.
+  Adding a licence that is already stored is refused, not merged.
+
+**Add or update licences in bulk from a file:**
+
+Point cdkeys at your database first (see [Configure](#configure)).
 
 1. Copy `entries.example.json` to `entries.local.json` and fill it in. Any
    `entries*.json` file other than the example is git-ignored, because it holds
@@ -102,7 +127,7 @@ db_path = 'C:\Users\you\OneDrive\cd_keys_encrypted.sqlite3'
 
 Use single quotes so backslashes stay literal. A relative path is taken
 relative to the settings file's folder. `settings.example.toml` is a template.
-There is no built-in default: if the file or `db_path` is missing, cdkeys says
+There is no built-in default: if the file or `db_path` is missing, the CLI says
 where to create it. `--db PATH` on either subcommand overrides the file for one
 run.
 

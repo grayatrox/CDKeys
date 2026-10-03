@@ -127,7 +127,8 @@ def _exists(con: DBConn, licence_id: str) -> bool:
     return found.fetchone() is not None
 
 
-def _new_id(fields: LicenceFields) -> str:
+def licence_id_for(fields: LicenceFields) -> str:
+    """The id these fields hash to; raises InvalidLicenceError if they cannot."""
     if not norm(fields.product_name):
         raise InvalidLicenceError("Product name is required.")
     try:
@@ -157,7 +158,7 @@ def add_licence(
     Unlike the batch import, adding a licence that already exists is refused
     rather than merged, so the user is not surprised by a silent update.
     """
-    licence_id = _new_id(fields)
+    licence_id = licence_id_for(fields)
     if _exists(con, licence_id):
         raise DuplicateLicenceError(
             f"{norm(fields.product_name)}: this licence is already stored."
@@ -194,7 +195,7 @@ def _is_legacy_manual(lic: Licence) -> bool:
     if lic.identity is not None:
         return False
     try:
-        return _new_id(lic.fields) != lic.id
+        return licence_id_for(lic.fields) != lic.id
     except InvalidLicenceError:
         return True
 
@@ -215,7 +216,7 @@ def update_licence(
     (the new id belongs to another licence) or IdentityRequiredError.
     """
     current = get_licence(con, licence_id)
-    new_id = _new_id(fields)
+    new_id = licence_id_for(fields)
 
     if _is_legacy_manual(current) and norm(fields.identity) is None:
         if _hashed_tokens(fields) != _hashed_tokens(current):
