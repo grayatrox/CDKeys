@@ -1,4 +1,4 @@
-# Setup from a clean checkout:
+# Setup from a clean checkout: python tasks.py setup  (equivalent to:)
 #   python -m venv .venv
 #   .venv/Scripts/python -m pip install -r requirements.lock
 #   .venv/Scripts/python -m pip install -e . --no-deps
@@ -25,7 +25,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 # Flat layout of standalone scripts; list them so editable installs work.
-py-modules = ["cdkeys_db", "upsert_licenses", "verify_cdkeys_db"]
+py-modules = ["cdkeys_db", "tasks", "upsert_licenses", "verify_cdkeys_db"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
