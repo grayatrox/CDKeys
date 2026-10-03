@@ -25,7 +25,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 # Flat layout of standalone scripts; list them so editable installs work.
-py-modules = ["verify_cdkeys_db"]
+py-modules = ["cdkeys_db", "upsert_licenses", "verify_cdkeys_db"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -35,6 +35,10 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "S", "BLE"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest's assertion rewriting is the test idiom; S101 targets runtime asserts.
+"tests/**" = ["S101"]
 
 [tool.mypy]
 strict = true

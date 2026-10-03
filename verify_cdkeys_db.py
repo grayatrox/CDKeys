@@ -4,36 +4,18 @@ import sqlite3
 import sys
 from getpass import getpass
 from pathlib import Path
-from typing import Any
 
 import sqlcipher3
 
-db_path = Path(r"C:\Users\chris\OneDrive\cd_keys_encrypted.sqlite3")
+from cdkeys_db import DB_PATH, DBConn, open_db
 
 
-# sqlcipher3 is untyped, so its connection is Any.
-def open_sqlcipher(db_path: Path, passphrase: str) -> Any:
-
-    con = sqlcipher3.connect(db_path)
-
-    cursor = con.cursor()
-
-    cursor.execute(f"PRAGMA key = '{passphrase}';")
-
-    try:
-        cursor.execute("SELECT count(*) FROM sqlite_master;")
-        print("Database opened successfully")
-    except sqlcipher3.DatabaseError:
-        print("Incorrect key")
-
-    return con
-
-
-def test_counts(con: Any) -> None:
+def test_counts(con: DBConn) -> None:
     print("\n--- License Count ---")
-    cur = con.execute("SELECT COUNT(*) FROM license;")
-    total = cur.fetchone()[0]
-    print(f"Total licenses: {total}")
+    row = con.execute("SELECT COUNT(*) FROM license;").fetchone()
+    if row is None:
+        raise RuntimeError("COUNT(*) returned no row.")
+    print(f"Total licenses: {row[0]}")
 
     print("\n--- Licenses Per Product ---")
     cur = con.execute("""
@@ -44,7 +26,7 @@ def test_counts(con: Any) -> None:
         ORDER BY p.name;
     """)
 
-    for name, count in cur:
+    for name, count in cur.fetchall():
         print(f"{name} → {count}")
 
 
@@ -62,14 +44,14 @@ def test_plaintext_access(db_path: Path) -> None:
 
 def main() -> None:
 
-    if not db_path.exists():
+    if not DB_PATH.exists():
         print("DB file does not exist.")
         sys.exit(1)
 
     password = getpass("Enter SQLCipher passphrase: ")
 
     try:
-        con = open_sqlcipher(db_path, password)
+        con = open_db(DB_PATH, password)
         test_counts(con)
         con.close()
     except sqlcipher3.Error as e:
@@ -77,7 +59,7 @@ def main() -> None:
         print(e)
         sys.exit(1)
 
-    test_plaintext_access(db_path)
+    test_plaintext_access(DB_PATH)
 
 
 if __name__ == "__main__":
