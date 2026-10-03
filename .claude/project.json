@@ -1,0 +1,20 @@
+{
+  "openproject": {
+    "project": "cdkeys",
+    "project_id": 14,
+    "claude_user_id": 5,
+    "blocked_assignee": "chris",
+    "statuses": {
+      "in_progress": 7,
+      "decision_required": 17,
+      "human_action_required": 18,
+      "human_action_completed": 16,
+      "closed": 12
+    },
+    "types": {
+      "phase": 3,
+      "task": 1,
+      "bug": 7
+    }
+  }
+}
