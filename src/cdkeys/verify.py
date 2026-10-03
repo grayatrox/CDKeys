@@ -10,8 +10,9 @@ from pathlib import Path
 
 import sqlcipher3
 
-from cdkeys.db import CDKeysDBError, DBConn, open_db, resolve_db_path
+from cdkeys.db import CDKeysDBError, DBConn, open_db
 from cdkeys.licenses import canon
+from cdkeys.settings import resolve_db_path, settings_path
 
 
 def test_counts(con: DBConn) -> None:
@@ -65,11 +66,13 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> None:
         prog=prog,
         description="Check the licence DB opens, is encrypted, and is consistent.",
     )
-    parser.add_argument("--db", help="database path (default: $CDKEYS_DB)")
+    parser.add_argument(
+        "--db", help="database path (default: db_path in the settings file)"
+    )
     args = parser.parse_args(argv)
 
     try:
-        db_path = resolve_db_path(args.db, os.environ)
+        db_path = resolve_db_path(args.db, settings_path(os.environ))
     except CDKeysDBError as e:
         print(e)
         sys.exit(1)

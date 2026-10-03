@@ -91,18 +91,20 @@ their own.
 
 ## Configure
 
-| Setting | How to set | Notes |
-|---|---|---|
-| Database path | `--db PATH` on either subcommand, or the `CDKEYS_DB` environment variable | Required. There is no built-in default. `--db` wins over `CDKEYS_DB`. |
+The database path lives in a per-user settings file, outside the repository:
 
-To set it permanently on Windows (takes effect in new terminals):
+- Windows: `%APPDATA%\cdkeys\settings.toml`
+- Linux/macOS: `~/.config/cdkeys/settings.toml` (or under `$XDG_CONFIG_HOME`)
 
-```powershell
-setx CDKEYS_DB "C:\path\to\cd_keys_encrypted.sqlite3"
+```toml
+db_path = 'C:\Users\you\OneDrive\cd_keys_encrypted.sqlite3'
 ```
 
-`.env.example` documents the variable. cdkeys reads the process
-environment and does not load `.env` files.
+Use single quotes so backslashes stay literal. A relative path is taken
+relative to the settings file's folder. `settings.example.toml` is a template.
+There is no built-in default: if the file or `db_path` is missing, cdkeys says
+where to create it. `--db PATH` on either subcommand overrides the file for one
+run.
 
 The cipher settings are fixed at the SQLCipher 4 defaults, which the existing
 database was created with. Opening it with any other key-derivation settings

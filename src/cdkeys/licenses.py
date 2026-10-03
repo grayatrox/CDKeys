@@ -18,8 +18,8 @@ from cdkeys.db import (
     DBConn,
     ensure_schema,
     open_db,
-    resolve_db_path,
 )
+from cdkeys.settings import resolve_db_path, settings_path
 
 
 # =========================
@@ -215,7 +215,9 @@ def prompt_passphrase(
 
     answer = ask(f"Database not found at {db_path}. Create a new one? [y/N] ")
     if answer.strip().casefold() not in ("y", "yes"):
-        raise SystemExit("Not creating a database. Check --db / CDKEYS_DB.")
+        raise SystemExit(
+            "Not creating a database. Check db_path in the settings file or --db."
+        )
     passphrase = ask_secret("New DB passphrase (won't echo): ")
     if not passphrase:
         raise SystemExit("Passphrase cannot be empty.")
@@ -287,11 +289,13 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> None:
         "(see entries.example.json). Keep that file out of git.",
     )
     parser.add_argument("entries", type=Path, help="path to the entries JSON file")
-    parser.add_argument("--db", help="database path (default: $CDKEYS_DB)")
+    parser.add_argument(
+        "--db", help="database path (default: db_path in the settings file)"
+    )
     args = parser.parse_args(argv)
 
     try:
-        db_path = resolve_db_path(args.db, os.environ)
+        db_path = resolve_db_path(args.db, settings_path(os.environ))
     except CDKeysDBError as err:
         raise SystemExit(str(err)) from err
 

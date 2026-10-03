@@ -1,0 +1,9 @@
+# cdkeys settings. Copy to your per-user settings file:
+#   Windows:  %APPDATA%\cdkeys\settings.toml
+#   Linux/macOS: ~/.config/cdkeys/settings.toml  (or $XDG_CONFIG_HOME/cdkeys/)
+# The GUI writes this file for you on first start.
+# --db PATH on the command line overrides it for one run.
+
+# Path to the SQLCipher-encrypted licence database. Single quotes keep
+# backslashes literal. A relative path is relative to this file's folder.
+db_path = 'C:\path\to\cd_keys_encrypted.sqlite3'

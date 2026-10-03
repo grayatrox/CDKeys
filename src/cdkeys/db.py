@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
 import sqlcipher3
-
-DB_ENV_VAR = "CDKEYS_DB"
 
 # Cipher settings are deliberately left at the SQLCipher 4 defaults (e.g.
 # 256000 KDF iterations): the existing DB was created with them, and keying
@@ -79,27 +76,6 @@ class DatabaseNotFoundError(CDKeysDBError):
 
 class WrongPassphraseError(CDKeysDBError):
     """The passphrase does not decrypt the database."""
-
-
-class ConfigError(CDKeysDBError):
-    """The database location is not configured."""
-
-
-def resolve_db_path(cli_value: str | None, environ: Mapping[str, str]) -> Path:
-    """
-    Resolve the database path: ``--db`` value, else $CDKEYS_DB.
-
-    There is deliberately no built-in default, so a missing setting fails
-    loudly instead of silently pointing at some other file. ``~`` is expanded.
-    Raises ConfigError if neither is set (or the value is blank).
-    """
-    value = cli_value if cli_value is not None else environ.get(DB_ENV_VAR)
-    if value is None or not value.strip():
-        raise ConfigError(
-            f"No database path: pass --db PATH or set the {DB_ENV_VAR} "
-            "environment variable (see .env.example)."
-        )
-    return Path(value.strip()).expanduser()
 
 
 def _sql_string_literal(value: str) -> str:
