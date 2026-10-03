@@ -1,0 +1,16 @@
+# Exact environment for Python 3.12 (runtime + dev group).
+# Regenerate: python -m venv .venv && .venv/Scripts/python -m pip install -e . --group dev
+#             then .venv/Scripts/python -m pip freeze --exclude-editable > requirements.lock (and re-add this header)
+ast_serialize==0.12.1
+colorama==0.4.6
+iniconfig==2.3.0
+librt==0.16.0
+mypy==2.3.1
+mypy_extensions==1.1.0
+packaging==26.3
+pathspec==1.1.1
+pluggy==1.6.0
+pytest==8.3.3
+ruff==0.16.8
+sqlcipher3==0.6.2
+typing_extensions==4.16.0

@@ -1,0 +1,31 @@
+# Setup from a clean checkout:
+#   python -m venv .venv
+#   .venv/Scripts/python -m pip install -r requirements.lock
+#   .venv/Scripts/python -m pip install -e . --no-deps
+
+[project]
+name = "cdkeys"
+version = "0.1.0"
+description = "Encrypted (SQLCipher) store for software licence keys"
+requires-python = ">=3.12"
+dependencies = [
+    "sqlcipher3==0.6.2",
+]
+
+[dependency-groups]
+dev = [
+    "mypy==2.3.1",
+    "pytest==8.3.3",
+    "ruff==0.16.8",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Flat layout of standalone scripts; list them so editable installs work.
+py-modules = ["verify_cdkeys_db"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
