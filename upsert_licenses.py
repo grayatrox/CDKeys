@@ -136,10 +136,11 @@ def upsert_license(
     assigned_device: str | None = None,  # not part of identity
     associated_login: str | None = None,
     notes: str | None = None,
+    now: Callable[[], str] = utc_now_iso,
 ) -> str:
     """
     Insert/update a license record using hash-as-primary-key.
-    Returns the license id (sha256 hex).
+    Returns the license id (sha256 hex). ``now`` supplies updated_utc.
     """
     product_id = get_or_create_product_id(con, product_name)
 
@@ -187,7 +188,7 @@ def upsert_license(
             assigned_device,
             associated_login,
             notes,
-            utc_now_iso(),
+            now(),
         ),
     )
     return license_id
@@ -314,7 +315,16 @@ def main(argv: list[str] | None = None) -> None:
     try:
         ensure_schema(con)
         for e in entries:
-            lid = upsert_license(con, **e)
+            lid = upsert_license(
+                con,
+                product_name=e["product_name"],
+                identity=e.get("identity"),
+                product_key=e.get("product_key"),
+                serial_number=e.get("serial_number"),
+                assigned_device=e.get("assigned_device"),
+                associated_login=e.get("associated_login"),
+                notes=e.get("notes"),
+            )
             processed += 1
             print(
                 f"Upserted ({processed}/{len(entries)}) "
