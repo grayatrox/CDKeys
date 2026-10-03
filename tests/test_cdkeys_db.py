@@ -72,6 +72,36 @@ def test_new_db_reopens_with_same_passphrase(tmp_path: Path) -> None:
     assert rows == [("Office",)]
 
 
+def test_db_with_explicit_sqlcipher4_settings_opens(tmp_path: Path) -> None:
+    # open_db relies on the library defaults matching SQLCipher 4, which the
+    # existing DB was created with; this catches a change of defaults.
+    db = tmp_path / "keys.sqlite3"
+    raw = sqlcipher3.connect(db)
+    raw.execute("PRAGMA key = 'pw';")
+    raw.execute("PRAGMA cipher_compatibility = 4;")
+    raw.execute("CREATE TABLE product (id INTEGER PRIMARY KEY, name TEXT)")
+    raw.execute("INSERT INTO product(name) VALUES ('Office')")
+    raw.commit()
+    raw.close()
+
+    assert _product_names(db, "pw") == [("Office",)]
+
+
+def test_db_with_other_kdf_iter_does_not_open(tmp_path: Path) -> None:
+    # Guards the reason the cipher settings are not configurable: a different
+    # kdf_iter derives a different key.
+    db = tmp_path / "keys.sqlite3"
+    raw = sqlcipher3.connect(db)
+    raw.execute("PRAGMA key = 'pw';")
+    raw.execute("PRAGMA kdf_iter = 64000;")
+    raw.execute("CREATE TABLE product (id INTEGER PRIMARY KEY, name TEXT)")
+    raw.commit()
+    raw.close()
+
+    with pytest.raises(WrongPassphraseError):
+        open_db(db, "pw")
+
+
 def test_wrong_passphrase_raises(tmp_path: Path) -> None:
     db = tmp_path / "keys.sqlite3"
     _create_with_product(db, "correct horse")

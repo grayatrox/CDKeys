@@ -9,13 +9,10 @@ import sqlcipher3
 
 DB_PATH = Path(r"C:\Users\chris\OneDrive\cd_keys_encrypted.sqlite3")
 
-# For a brand new DB you can usually leave this as None.
-# If you later need to open a DB created with a specific SQLCipher major version,
-# you might set this (commonly 3 or 4 depending on environment).
-CIPHER_COMPATIBILITY: int | None = None  # e.g. 4
-
-# KDF iterations: higher = more brute-force resistance, slower unlock.
-KDF_ITER = 256000
+# Cipher settings are deliberately left at the SQLCipher 4 defaults (e.g.
+# 256000 KDF iterations): the existing DB was created with them, and keying
+# with any other kdf_iter/cipher_compatibility would fail to open it.
+# Strengthening them needs a PRAGMA rekey / sqlcipher_export migration.
 
 
 SCHEMA_SQL = """
