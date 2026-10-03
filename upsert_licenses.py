@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import hashlib
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from getpass import getpass
@@ -202,7 +204,74 @@ def prompt_passphrase(
     return passphrase, True
 
 
-def main() -> None:
+ENTRY_FIELDS = frozenset(
+    {
+        "identity",
+        "product_name",
+        "product_key",
+        "serial_number",
+        "assigned_device",
+        "associated_login",
+        "notes",
+    }
+)
+
+
+class EntriesError(ValueError):
+    """The entries file is unreadable or malformed."""
+
+
+def load_entries(path: Path) -> list[dict[str, str]]:
+    """
+    Read and validate licence entries from a JSON file.
+
+    The file holds a list of objects using the keyword arguments of
+    upsert_license (see entries.example.json). Everything is validated before
+    the database is touched, so a typo cannot leave a half-applied batch.
+    Raises EntriesError naming the offending entry (1-based).
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as e:
+        raise EntriesError(f"{path}: cannot read: {e}") from e
+    except json.JSONDecodeError as e:
+        raise EntriesError(f"{path}: not valid JSON: {e}") from e
+
+    if not isinstance(data, list):
+        raise EntriesError(f"{path}: must be a JSON list of entries")
+    if not data:
+        raise EntriesError(f"{path}: no entries")
+
+    entries: list[dict[str, str]] = []
+    for i, raw in enumerate(data, start=1):
+        if not isinstance(raw, dict):
+            raise EntriesError(f"{path}: entry {i}: must be an object")
+        unknown = sorted(set(raw) - ENTRY_FIELDS)
+        if unknown:
+            raise EntriesError(
+                f"{path}: entry {i}: unknown field(s): {', '.join(unknown)}"
+            )
+        for key, value in raw.items():
+            if not isinstance(value, str):
+                raise EntriesError(f"{path}: entry {i}: '{key}' must be a string")
+        if not norm(raw.get("product_name")):
+            raise EntriesError(f"{path}: entry {i}: missing 'product_name'")
+        entries.append(raw)
+    return entries
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Insert or update licences from a JSON file "
+        "(see entries.example.json). Keep that file out of git."
+    )
+    parser.add_argument("entries", type=Path, help="path to the entries JSON file")
+    args = parser.parse_args(argv)
+
+    try:
+        entries = load_entries(args.entries)
+    except EntriesError as err:
+        raise SystemExit(str(err)) from err
 
     from sqlcipher3 import dbapi2 as sqlcipher
 
@@ -216,39 +285,6 @@ def main() -> None:
     except CDKeysDBError as err:
         raise SystemExit(str(err)) from err
     ensure_schema(con)
-
-    # ---- MANUAL ENTRY ZONE ----
-    # Notes:
-    # - One dict per license record.
-    # - Uniqueness is the hash of:
-    #   product_name + (product_key/serial_number/associated_login),
-    #   OR product_name + identity (manual override).
-    # - If you have NO product_key/serial_number/associated_login,
-    #   you MUST set "identity".
-    # - assigned_device and notes are NOT part of uniqueness; change them any time.
-    #
-    # Template (copy/paste one block per entry):
-    # {
-    #     "identity": "invoice_no",          # optional unless no key/serial/login
-    #     "product_name": "Product",
-    #     "product_key": "key",
-    #     "serial_number": "SN",
-    #     "assigned_device": "device_name",
-    #     "associated_login": "email_username",
-    #     "notes": "notes",
-    # },
-    entries: list[dict[str, str]] = [
-        {
-            "identity": "invoice_no",  # optional unless no key/serial/login
-            "product_name": "Product",
-            "product_key": "key",
-            "serial_number": "SN",
-            "assigned_device": "device_name",
-            "associated_login": "email_username",
-            "notes": "notes",
-        },
-    ]
-    # ---------------------------
 
     print(redacted_preview(entries))
 

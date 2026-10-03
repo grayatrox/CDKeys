@@ -1,0 +1,15 @@
+[
+  {
+    "product_name": "Example Product",
+    "product_key": "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
+    "serial_number": "SN-0000",
+    "assigned_device": "device-name",
+    "associated_login": "user@example.com",
+    "notes": "free text; not part of identity"
+  },
+  {
+    "product_name": "Example Product Without Key",
+    "identity": "invoice-12345",
+    "notes": "identity is required when there is no key, serial or login"
+  }
+]

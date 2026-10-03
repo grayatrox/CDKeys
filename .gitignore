@@ -15,3 +15,7 @@ build/
 # Databases (never commit key stores)
 *.sqlite3
 *.db
+
+# Licence entry files hold plaintext keys; only the template is tracked
+entries*.json
+!entries.example.json
