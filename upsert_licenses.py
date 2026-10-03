@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from contextlib import closing
 from datetime import UTC, datetime
@@ -11,7 +12,13 @@ from getpass import getpass
 from pathlib import Path
 from pprint import pformat
 
-from cdkeys_db import DB_PATH, CDKeysDBError, DBConn, ensure_schema, open_db
+from cdkeys_db import (
+    CDKeysDBError,
+    DBConn,
+    ensure_schema,
+    open_db,
+    resolve_db_path,
+)
 
 
 # =========================
@@ -206,7 +213,7 @@ def prompt_passphrase(
 
     answer = ask(f"Database not found at {db_path}. Create a new one? [y/N] ")
     if answer.strip().casefold() not in ("y", "yes"):
-        raise SystemExit("Not creating a database. Check DB_PATH.")
+        raise SystemExit("Not creating a database. Check --db / CDKEYS_DB.")
     passphrase = ask_secret("New DB passphrase (won't echo): ")
     if not passphrase:
         raise SystemExit("Passphrase cannot be empty.")
@@ -277,7 +284,13 @@ def main(argv: list[str] | None = None) -> None:
         "(see entries.example.json). Keep that file out of git."
     )
     parser.add_argument("entries", type=Path, help="path to the entries JSON file")
+    parser.add_argument("--db", help="database path (default: $CDKEYS_DB)")
     args = parser.parse_args(argv)
+
+    try:
+        db_path = resolve_db_path(args.db, os.environ)
+    except CDKeysDBError as err:
+        raise SystemExit(str(err)) from err
 
     try:
         entries = load_entries(args.entries)
@@ -289,9 +302,9 @@ def main(argv: list[str] | None = None) -> None:
     with closing(sqlcipher.connect(":memory:")) as mem:
         print(f"Version: {mem.execute('PRAGMA cipher_version;').fetchone()}")
 
-    passphrase, create = prompt_passphrase(DB_PATH)
+    passphrase, create = prompt_passphrase(db_path)
     try:
-        con = open_db(DB_PATH, passphrase, create=create)
+        con = open_db(db_path, passphrase, create=create)
     except CDKeysDBError as err:
         raise SystemExit(str(err)) from err
 
@@ -314,7 +327,7 @@ def main(argv: list[str] | None = None) -> None:
     finally:
         con.close()
 
-    print(f"Done. Upserted {processed} records into {DB_PATH}")
+    print(f"Done. Upserted {processed} records into {db_path}")
 
 
 def redacted_preview(entries: list[dict[str, str]]) -> str:

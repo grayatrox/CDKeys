@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import argparse
+import os
 import sqlite3
 import sys
 from contextlib import closing
@@ -8,7 +10,7 @@ from pathlib import Path
 
 import sqlcipher3
 
-from cdkeys_db import DB_PATH, CDKeysDBError, DBConn, open_db
+from cdkeys_db import CDKeysDBError, DBConn, open_db, resolve_db_path
 from upsert_licenses import canon
 
 
@@ -58,23 +60,34 @@ def test_plaintext_access(db_path: Path) -> None:
         print(f"Error: {e}")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Check the licence DB opens, is encrypted, and is consistent."
+    )
+    parser.add_argument("--db", help="database path (default: $CDKEYS_DB)")
+    args = parser.parse_args(argv)
 
-    if not DB_PATH.exists():
+    try:
+        db_path = resolve_db_path(args.db, os.environ)
+    except CDKeysDBError as e:
+        print(e)
+        sys.exit(1)
+
+    if not db_path.exists():
         print("DB file does not exist.")
         sys.exit(1)
 
     password = getpass("Enter SQLCipher passphrase: ")
 
     try:
-        with closing(open_db(DB_PATH, password)) as con:
+        with closing(open_db(db_path, password)) as con:
             test_counts(con)
     except (CDKeysDBError, sqlcipher3.Error) as e:
         print("\nFAILED to open with SQLCipher.")
         print(e)
         sys.exit(1)
 
-    test_plaintext_access(DB_PATH)
+    test_plaintext_access(db_path)
 
 
 if __name__ == "__main__":
