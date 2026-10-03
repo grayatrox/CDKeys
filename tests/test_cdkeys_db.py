@@ -4,11 +4,16 @@ from pathlib import Path
 import pytest
 import sqlcipher3
 
-from cdkeys_db import ensure_schema, open_db
+from cdkeys_db import (
+    DatabaseNotFoundError,
+    WrongPassphraseError,
+    ensure_schema,
+    open_db,
+)
 
 
 def _create_with_product(db: Path, passphrase: str) -> None:
-    con = open_db(db, passphrase)
+    con = open_db(db, passphrase, create=True)
     ensure_schema(con)
     con.execute("INSERT INTO product(name) VALUES (?)", ("Office",))
     con.commit()
@@ -54,7 +59,7 @@ def test_db_keyed_before_escaping_still_opens(tmp_path: Path) -> None:
 
 def test_new_db_reopens_with_same_passphrase(tmp_path: Path) -> None:
     db = tmp_path / "keys.sqlite3"
-    con = open_db(db, "correct horse")
+    con = open_db(db, "correct horse", create=True)
     ensure_schema(con)
     con.execute("INSERT INTO product(name) VALUES (?)", ("Office",))
     con.commit()
@@ -67,9 +72,45 @@ def test_new_db_reopens_with_same_passphrase(tmp_path: Path) -> None:
     assert rows == [("Office",)]
 
 
+def test_wrong_passphrase_raises(tmp_path: Path) -> None:
+    db = tmp_path / "keys.sqlite3"
+    _create_with_product(db, "correct horse")
+
+    with pytest.raises(WrongPassphraseError):
+        open_db(db, "wrong horse")
+
+
+def test_missing_db_raises_and_creates_nothing(tmp_path: Path) -> None:
+    db = tmp_path / "moved" / "keys.sqlite3"
+
+    with pytest.raises(DatabaseNotFoundError):
+        open_db(db, "correct horse")
+
+    assert not db.exists()
+
+
+def test_create_flag_creates_missing_db(tmp_path: Path) -> None:
+    db = tmp_path / "keys.sqlite3"
+    _create_with_product(db, "correct horse")
+
+    assert db.exists()
+    assert _product_names(db, "correct horse") == [("Office",)]
+
+
+def test_create_flag_on_existing_db_opens_it(tmp_path: Path) -> None:
+    db = tmp_path / "keys.sqlite3"
+    _create_with_product(db, "correct horse")
+
+    con = open_db(db, "correct horse", create=True)
+    rows = con.execute("SELECT name FROM product").fetchall()
+    con.close()
+
+    assert rows == [("Office",)]
+
+
 def test_db_is_not_readable_as_plain_sqlite(tmp_path: Path) -> None:
     db = tmp_path / "keys.sqlite3"
-    con = open_db(db, "correct horse")
+    con = open_db(db, "correct horse", create=True)
     ensure_schema(con)
     con.commit()
     con.close()

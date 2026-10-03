@@ -71,13 +71,33 @@ class DBConn(Protocol):
     def close(self) -> None: ...
 
 
+class CDKeysDBError(Exception):
+    """Base class for errors opening the licence database."""
+
+
+class DatabaseNotFoundError(CDKeysDBError):
+    """The database file does not exist and creation was not requested."""
+
+
+class WrongPassphraseError(CDKeysDBError):
+    """The passphrase does not decrypt the database."""
+
+
 def _sql_string_literal(value: str) -> str:
     """Quote ``value`` as a SQL string literal, doubling embedded quotes."""
     return "'" + value.replace("'", "''") + "'"
 
 
-def open_db(db_path: Path, passphrase: str) -> DBConn:
-    """Open the SQLCipher database at ``db_path`` keyed with ``passphrase``."""
+def open_db(db_path: Path, passphrase: str, *, create: bool = False) -> DBConn:
+    """Open the SQLCipher database at ``db_path`` keyed with ``passphrase``.
+
+    Raises DatabaseNotFoundError if the file is missing and ``create`` is
+    false; sqlcipher3 would otherwise silently create an empty database.
+    Raises WrongPassphraseError if the passphrase does not decrypt it.
+    """
+    if not create and not db_path.exists():
+        raise DatabaseNotFoundError(f"Database not found: {db_path}")
+
     con: DBConn = sqlcipher3.connect(db_path)
 
     # PRAGMA cannot take bound parameters, so the passphrase must be quoted
@@ -85,10 +105,11 @@ def open_db(db_path: Path, passphrase: str) -> DBConn:
     con.execute(f"PRAGMA key = {_sql_string_literal(passphrase)};")
 
     try:
+        # SQLCipher only decrypts on first read, so a wrong key surfaces here.
         con.execute("SELECT count(*) FROM sqlite_master;")
-        print("Database opened successfully")
-    except sqlcipher3.DatabaseError:
-        print("Incorrect key")
+    except sqlcipher3.DatabaseError as e:
+        con.close()
+        raise WrongPassphraseError(f"Wrong passphrase for {db_path}") from e
 
     return con
 

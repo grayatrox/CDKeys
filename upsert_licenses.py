@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from datetime import UTC, datetime
 from getpass import getpass
+from pathlib import Path
 from pprint import pformat
 
-from cdkeys_db import DB_PATH, DBConn, ensure_schema, open_db
+from cdkeys_db import DB_PATH, CDKeysDBError, DBConn, ensure_schema, open_db
 
 
 # =========================
@@ -171,6 +173,35 @@ def upsert_license(
     return license_id
 
 
+def prompt_passphrase(
+    db_path: Path,
+    ask_secret: Callable[[str], str] = getpass,
+    ask: Callable[[str], str] = input,
+) -> tuple[str, bool]:
+    """
+    Ask for the passphrase; returns (passphrase, create).
+
+    A missing database is only created after explicit confirmation, and a new
+    passphrase must be typed twice: a typo there would lock the new database.
+    Raises SystemExit if the user declines, or on empty/mismatched input.
+    """
+    if db_path.exists():
+        passphrase = ask_secret("DB passphrase (won't echo): ")
+        if not passphrase:
+            raise SystemExit("Passphrase cannot be empty.")
+        return passphrase, False
+
+    answer = ask(f"Database not found at {db_path}. Create a new one? [y/N] ")
+    if answer.strip().casefold() not in ("y", "yes"):
+        raise SystemExit("Not creating a database. Check DB_PATH.")
+    passphrase = ask_secret("New DB passphrase (won't echo): ")
+    if not passphrase:
+        raise SystemExit("Passphrase cannot be empty.")
+    if ask_secret("Repeat new DB passphrase: ") != passphrase:
+        raise SystemExit("Passphrases do not match.")
+    return passphrase, True
+
+
 def main() -> None:
 
     from sqlcipher3 import dbapi2 as sqlcipher
@@ -179,11 +210,11 @@ def main() -> None:
     cur = con.execute("PRAGMA cipher_version;")
     print(f"Version: {cur.fetchone()}")
 
-    passphrase = getpass("DB passphrase (won't echo): ")
-    if not passphrase:
-        raise SystemExit("Passphrase cannot be empty.")
-
-    con = open_db(DB_PATH, passphrase)
+    passphrase, create = prompt_passphrase(DB_PATH)
+    try:
+        con = open_db(DB_PATH, passphrase, create=create)
+    except CDKeysDBError as err:
+        raise SystemExit(str(err)) from err
     ensure_schema(con)
 
     # ---- MANUAL ENTRY ZONE ----

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import sqlcipher3
 
-from cdkeys_db import DB_PATH, DBConn, open_db
+from cdkeys_db import DB_PATH, CDKeysDBError, DBConn, open_db
 
 
 def test_counts(con: DBConn) -> None:
@@ -54,7 +54,7 @@ def main() -> None:
         con = open_db(DB_PATH, password)
         test_counts(con)
         con.close()
-    except sqlcipher3.Error as e:
+    except (CDKeysDBError, sqlcipher3.Error) as e:
         print("\nFAILED to open with SQLCipher.")
         print(e)
         sys.exit(1)
