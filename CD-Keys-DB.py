@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import sys
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from getpass import getpass
 from pathlib import Path
-from typing import Optional, Protocol
+from pprint import pformat
+from typing import Any, Protocol
+
 import sqlcipher3
 
 # =========================
@@ -17,7 +18,7 @@ DB_PATH = Path(r"C:\Users\chris\OneDrive\cd_keys_encrypted.sqlite3")
 # For a brand new DB you can usually leave this as None.
 # If you later need to open a DB created with a specific SQLCipher major version,
 # you might set this (commonly 3 or 4 depending on environment).
-CIPHER_COMPATIBILITY: Optional[int] = None  # e.g. 4
+CIPHER_COMPATIBILITY: int | None = None  # e.g. 4
 
 # KDF iterations: higher = more brute-force resistance, slower unlock.
 KDF_ITER = 256000
@@ -33,7 +34,8 @@ CREATE TABLE IF NOT EXISTS product (
 
 -- Hash-as-primary-key:
 -- license.id is a deterministic SHA-256 hex digest derived from:
---   product name + (product_key / serial_number / associated_login) OR manual identity override.
+--   product name + (product_key / serial_number / associated_login)
+--   OR manual identity override.
 CREATE TABLE IF NOT EXISTS license (
     id TEXT PRIMARY KEY,
 
@@ -63,8 +65,14 @@ CREATE INDEX IF NOT EXISTS idx_license_associated_login
 # =========================
 # Types
 # =========================
+class DBCursor(Protocol):
+    # Row values are whatever SQLite stored, so they are Any (as in typeshed's
+    # sqlite3.Cursor.fetchone).
+    def fetchone(self) -> tuple[Any, ...] | None: ...
+
+
 class DBConn(Protocol):
-    def execute(self, sql: str, params: tuple = ...) -> object: ...
+    def execute(self, sql: str, params: tuple[object, ...] = ...) -> DBCursor: ...
     def executescript(self, sql: str) -> object: ...
     def commit(self) -> None: ...
     def rollback(self) -> None: ...
@@ -75,10 +83,10 @@ class DBConn(Protocol):
 # Helpers
 # =========================
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def norm(s: Optional[str]) -> Optional[str]:
+def norm(s: str | None) -> str | None:
     """Trim; empty => None."""
     if s is None:
         return None
@@ -86,7 +94,7 @@ def norm(s: Optional[str]) -> Optional[str]:
     return s if s else None
 
 
-def canon(s: Optional[str]) -> Optional[str]:
+def canon(s: str | None) -> str | None:
     """Normalize for identity comparisons (case-insensitive)."""
     s = norm(s)
     if s is None:
@@ -97,17 +105,19 @@ def canon(s: Optional[str]) -> Optional[str]:
 def make_license_id(
     *,
     product_name: str,
-    identity: Optional[str],
-    product_key: Optional[str],
-    serial_number: Optional[str],
-    associated_login: Optional[str],
+    identity: str | None,
+    product_key: str | None,
+    serial_number: str | None,
+    associated_login: str | None,
 ) -> str:
     """
     Deterministic SHA-256 hex digest for a license.
 
-    - Includes product_name so identical tokens across different products won't collide.
+    - Includes product_name so identical tokens across different products
+      won't collide.
     - Excludes assigned_device and notes (not part of identity).
-    - Accepts a manual identity override for weird vendor schemes or missing token fields.
+    - Accepts a manual identity override for weird vendor schemes or missing
+      token fields.
 
     IMPORTANT: Do not change the v1 payload rules once you start using this DB,
     or you'll generate different IDs for the same licenses.
@@ -118,11 +128,13 @@ def make_license_id(
 
     manual = canon(identity)
     if manual:
-        payload = "\0".join([
-            "v1",
-            f"product={pname}",
-            f"manual={manual}",
-        ])
+        payload = "\0".join(
+            [
+                "v1",
+                f"product={pname}",
+                f"manual={manual}",
+            ]
+        )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     pk = canon(product_key)
@@ -136,26 +148,26 @@ def make_license_id(
         )
 
     # Use NUL-separated format + key=value pairs to avoid ambiguity.
-    payload = "\0".join([
-        "v1",
-        f"product={pname}",
-        f"pk={pk or ''}",
-        f"sn={sn or ''}",
-        f"login={al or ''}",
-    ])
+    payload = "\0".join(
+        [
+            "v1",
+            f"product={pname}",
+            f"pk={pk or ''}",
+            f"sn={sn or ''}",
+            f"login={al or ''}",
+        ]
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def connect_sqlcipher(db_path: Path, passphrase: str) -> DBConn:
 
-    con = sqlcipher3.connect(db_path)
+    con: DBConn = sqlcipher3.connect(db_path)
 
-    cursor = con.cursor()
-
-    cursor.execute(f"PRAGMA key = '{passphrase}';")
+    con.execute(f"PRAGMA key = '{passphrase}';")
 
     try:
-        cursor.execute("SELECT count(*) FROM sqlite_master;")
+        con.execute("SELECT count(*) FROM sqlite_master;")
         print("Database opened successfully")
     except sqlcipher3.DatabaseError:
         print("Incorrect key")
@@ -171,8 +183,11 @@ def get_or_create_product_id(con: DBConn, product_name: str) -> int:
         raise ValueError("Product name cannot be empty.")
 
     con.execute("INSERT OR IGNORE INTO product(name) VALUES (?)", (product_name,))
-    row = con.execute("SELECT id FROM product WHERE name = ?", (product_name,)).fetchone()
-    assert row is not None, "Failed to load product after insert/ignore."
+    row = con.execute(
+        "SELECT id FROM product WHERE name = ?", (product_name,)
+    ).fetchone()
+    if row is None:
+        raise RuntimeError("Failed to load product after insert/ignore.")
     return int(row[0])
 
 
@@ -180,12 +195,12 @@ def upsert_license(
     con: DBConn,
     *,
     product_name: str,
-    identity: Optional[str] = None,          # manual override (optional)
-    product_key: Optional[str] = None,
-    serial_number: Optional[str] = None,
-    assigned_device: Optional[str] = None,   # not part of identity
-    associated_login: Optional[str] = None,
-    notes: Optional[str] = None,
+    identity: str | None = None,  # manual override (optional)
+    product_key: str | None = None,
+    serial_number: str | None = None,
+    assigned_device: str | None = None,  # not part of identity
+    associated_login: str | None = None,
+    notes: str | None = None,
 ) -> str:
     """
     Insert/update a license record using hash-as-primary-key.
@@ -213,17 +228,21 @@ def upsert_license(
     con.execute(
         """
         INSERT INTO license (
-            id, product_id, product_key, serial_number, assigned_device, associated_login, notes, updated_utc
+            id, product_id, product_key, serial_number, assigned_device,
+            associated_login, notes, updated_utc
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-            product_id        = excluded.product_id,
-            product_key       = COALESCE(excluded.product_key, license.product_key),
-            serial_number     = COALESCE(excluded.serial_number, license.serial_number),
-            associated_login  = COALESCE(excluded.associated_login, license.associated_login),
-            assigned_device   = COALESCE(excluded.assigned_device, license.assigned_device),
-            notes             = COALESCE(excluded.notes, license.notes),
-            updated_utc       = excluded.updated_utc
+            product_id       = excluded.product_id,
+            product_key      = COALESCE(excluded.product_key, license.product_key),
+            serial_number    = COALESCE(excluded.serial_number,
+                                        license.serial_number),
+            associated_login = COALESCE(excluded.associated_login,
+                                        license.associated_login),
+            assigned_device  = COALESCE(excluded.assigned_device,
+                                        license.assigned_device),
+            notes            = COALESCE(excluded.notes, license.notes),
+            updated_utc      = excluded.updated_utc
         """,
         (
             license_id,
@@ -247,7 +266,6 @@ def main() -> None:
     cur = con.execute("PRAGMA cipher_version;")
     print(f"Version: {cur.fetchone()}")
 
-
     passphrase = getpass("DB passphrase (won't echo): ")
     if not passphrase:
         raise SystemExit("Passphrase cannot be empty.")
@@ -257,9 +275,11 @@ def main() -> None:
     # ---- MANUAL ENTRY ZONE ----
     # Notes:
     # - One dict per license record.
-    # - Uniqueness is the hash of: product_name + (product_key/serial_number/associated_login),
+    # - Uniqueness is the hash of:
+    #   product_name + (product_key/serial_number/associated_login),
     #   OR product_name + identity (manual override).
-    # - If you have NO product_key/serial_number/associated_login, you MUST set "identity".
+    # - If you have NO product_key/serial_number/associated_login,
+    #   you MUST set "identity".
     # - assigned_device and notes are NOT part of uniqueness; change them any time.
     #
     # Template (copy/paste one block per entry):
@@ -272,9 +292,9 @@ def main() -> None:
     #     "associated_login": "email_username",
     #     "notes": "notes",
     # },
-    entries = [
+    entries: list[dict[str, str]] = [
         {
-            "identity": "invoice_no",          # optional unless no key/serial/login
+            "identity": "invoice_no",  # optional unless no key/serial/login
             "product_name": "Product",
             "product_key": "key",
             "serial_number": "SN",
@@ -282,20 +302,20 @@ def main() -> None:
             "associated_login": "email_username",
             "notes": "notes",
         },
-        
     ]
     # ---------------------------
 
     print(redacted_preview(entries))
 
-
-
     processed = 0
     try:
         for e in entries:
-            lid = upsert_license(con, **e)  # type: ignore[arg-type]
+            lid = upsert_license(con, **e)
             processed += 1
-            print(f"Upserted ({processed}/{len(entries)}) product='{e['product_name']}' id={lid}")
+            print(
+                f"Upserted ({processed}/{len(entries)}) "
+                f"product='{e['product_name']}' id={lid}"
+            )
         con.commit()
     except Exception:
         con.rollback()
@@ -304,10 +324,9 @@ def main() -> None:
         con.close()
 
     print(f"Done. Upserted {processed} records into {DB_PATH}")
-import sys
-from pprint import pformat
 
-def redacted_preview(entries: list[dict]) -> str:
+
+def redacted_preview(entries: list[dict[str, str]]) -> str:
     redacted = []
 
     for e in entries:
@@ -330,16 +349,11 @@ def redacted_preview(entries: list[dict]) -> str:
             d["notes"] = notes.replace(key, "REDACTED")
 
         # Remove empty / None fields
-        cleaned = {
-            k: v
-            for k, v in d.items()
-            if v not in ("", None)
-        }
+        cleaned = {k: v for k, v in d.items() if v not in ("", None)}
 
         redacted.append(cleaned)
 
     return pformat(redacted, width=120, sort_dicts=False)
-
 
 
 if __name__ == "__main__":
