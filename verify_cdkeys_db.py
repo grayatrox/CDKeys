@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlcipher3
 
 from cdkeys_db import DB_PATH, CDKeysDBError, DBConn, open_db
+from upsert_licenses import canon
 
 
 def test_counts(con: DBConn) -> None:
@@ -28,6 +29,21 @@ def test_counts(con: DBConn) -> None:
 
     for name, count in cur.fetchall():
         print(f"{name} → {count}")
+
+    print("\n--- Product Names Differing Only By Case ---")
+    groups = case_duplicate_products(con)
+    for names in groups:
+        print("⚠ " + " | ".join(names))
+    if not groups:
+        print("OK: none.")
+
+
+def case_duplicate_products(con: DBConn) -> list[list[str]]:
+    """Group product names that are the same under canon() (#621)."""
+    by_canon: dict[str | None, list[str]] = {}
+    for (name,) in con.execute("SELECT name FROM product ORDER BY id").fetchall():
+        by_canon.setdefault(canon(name), []).append(name)
+    return [names for names in by_canon.values() if len(names) > 1]
 
 
 def test_plaintext_access(db_path: Path) -> None:

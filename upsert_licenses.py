@@ -99,12 +99,22 @@ def get_or_create_product_id(con: DBConn, product_name: str) -> int:
     if not product_name:
         raise ValueError("Product name cannot be empty.")
 
-    con.execute("INSERT OR IGNORE INTO product(name) VALUES (?)", (product_name,))
+    # Match with canon(), the same normalisation make_license_id uses, so names
+    # differing only by case map to one product. SQLite's NOCASE folds ASCII
+    # only, so the comparison is done here. The first spelling seen is kept;
+    # lowest id wins if an older DB already holds case-variant duplicates.
+    wanted = canon(product_name)
+    rows = con.execute("SELECT id, name FROM product ORDER BY id").fetchall()
+    for product_id, name in rows:
+        if canon(name) == wanted:
+            return int(product_id)
+
+    con.execute("INSERT INTO product(name) VALUES (?)", (product_name,))
     row = con.execute(
         "SELECT id FROM product WHERE name = ?", (product_name,)
     ).fetchone()
     if row is None:
-        raise RuntimeError("Failed to load product after insert/ignore.")
+        raise RuntimeError("Failed to load product after insert.")
     return int(row[0])
 
 
