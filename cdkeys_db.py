@@ -71,11 +71,18 @@ class DBConn(Protocol):
     def close(self) -> None: ...
 
 
+def _sql_string_literal(value: str) -> str:
+    """Quote ``value`` as a SQL string literal, doubling embedded quotes."""
+    return "'" + value.replace("'", "''") + "'"
+
+
 def open_db(db_path: Path, passphrase: str) -> DBConn:
     """Open the SQLCipher database at ``db_path`` keyed with ``passphrase``."""
     con: DBConn = sqlcipher3.connect(db_path)
 
-    con.execute(f"PRAGMA key = '{passphrase}';")
+    # PRAGMA cannot take bound parameters, so the passphrase must be quoted
+    # here. Quote-free passphrases produce the same literal as before.
+    con.execute(f"PRAGMA key = {_sql_string_literal(passphrase)};")
 
     try:
         con.execute("SELECT count(*) FROM sqlite_master;")
