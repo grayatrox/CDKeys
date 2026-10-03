@@ -34,6 +34,12 @@ where = ["src"]
 testpaths = ["tests"]
 # tasks.py and launch.py are repo-root scripts, not part of the package.
 pythonpath = ["."]
+# pytest's default fd-level capture redirects the process's stdio handles,
+# and with it Tcl intermittently fails to read its own init.tcl / ttk scripts
+# on Windows ("couldn't read file ... No error"), erroring random GUI tests.
+# sys-level capture still captures all Python output; 0 failures in repeat
+# runs versus roughly half of runs failing with fd capture.
+addopts = "--capture=sys"
 
 [tool.ruff]
 target-version = "py312"

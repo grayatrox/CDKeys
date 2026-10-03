@@ -33,7 +33,7 @@ def test_no_command_prints_usage_and_exits_2(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert cli.main([]) == 2
-    assert "usage: cdkeys {add,verify}" in capsys.readouterr().out
+    assert "usage: cdkeys {add,verify,gui}" in capsys.readouterr().out
 
 
 def test_help_exits_0(capsys: pytest.CaptureFixture[str]) -> None:
