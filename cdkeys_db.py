@@ -96,17 +96,19 @@ def open_db(db_path: Path, passphrase: str, *, create: bool = False) -> DBConn:
         raise DatabaseNotFoundError(f"Database not found: {db_path}")
 
     con: DBConn = sqlcipher3.connect(db_path)
-
-    # PRAGMA cannot take bound parameters, so the passphrase must be quoted
-    # here. Quote-free passphrases produce the same literal as before.
-    con.execute(f"PRAGMA key = {_sql_string_literal(passphrase)};")
-
     try:
-        # SQLCipher only decrypts on first read, so a wrong key surfaces here.
-        con.execute("SELECT count(*) FROM sqlite_master;")
-    except sqlcipher3.DatabaseError as e:
+        # PRAGMA cannot take bound parameters, so the passphrase must be quoted
+        # here. Quote-free passphrases produce the same literal as before.
+        con.execute(f"PRAGMA key = {_sql_string_literal(passphrase)};")
+
+        try:
+            # SQLCipher only decrypts on first read, so a wrong key surfaces here.
+            con.execute("SELECT count(*) FROM sqlite_master;")
+        except sqlcipher3.DatabaseError as e:
+            raise WrongPassphraseError(f"Wrong passphrase for {db_path}") from e
+    except BaseException:
         con.close()
-        raise WrongPassphraseError(f"Wrong passphrase for {db_path}") from e
+        raise
 
     return con
 

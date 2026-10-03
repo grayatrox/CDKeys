@@ -109,6 +109,9 @@ def test_wrong_passphrase_raises(tmp_path: Path) -> None:
     with pytest.raises(WrongPassphraseError):
         open_db(db, "wrong horse")
 
+    # The failed open must not hold the file (Windows blocks deleting it).
+    db.unlink()
+
 
 def test_missing_db_raises_and_creates_nothing(tmp_path: Path) -> None:
     db = tmp_path / "moved" / "keys.sqlite3"

@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 from collections.abc import Callable
+from contextlib import closing
 from datetime import UTC, datetime
 from getpass import getpass
 from pathlib import Path
@@ -285,21 +286,20 @@ def main(argv: list[str] | None = None) -> None:
 
     from sqlcipher3 import dbapi2 as sqlcipher
 
-    con = sqlcipher.connect(":memory:")
-    cur = con.execute("PRAGMA cipher_version;")
-    print(f"Version: {cur.fetchone()}")
+    with closing(sqlcipher.connect(":memory:")) as mem:
+        print(f"Version: {mem.execute('PRAGMA cipher_version;').fetchone()}")
 
     passphrase, create = prompt_passphrase(DB_PATH)
     try:
         con = open_db(DB_PATH, passphrase, create=create)
     except CDKeysDBError as err:
         raise SystemExit(str(err)) from err
-    ensure_schema(con)
 
     print(redacted_preview(entries))
 
     processed = 0
     try:
+        ensure_schema(con)
         for e in entries:
             lid = upsert_license(con, **e)
             processed += 1

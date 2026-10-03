@@ -2,6 +2,7 @@
 
 import sqlite3
 import sys
+from contextlib import closing
 from getpass import getpass
 from pathlib import Path
 
@@ -49,9 +50,8 @@ def case_duplicate_products(con: DBConn) -> list[list[str]]:
 def test_plaintext_access(db_path: Path) -> None:
     print("\n--- Plain sqlite3 test (should FAIL) ---")
     try:
-        sqlite3.connect(str(db_path)).execute(
-            "SELECT COUNT(*) FROM license;"
-        ).fetchall()
+        with closing(sqlite3.connect(str(db_path))) as plain:
+            plain.execute("SELECT COUNT(*) FROM license;").fetchall()
         print("⚠ WARNING: Opened with plain sqlite3. This is NOT encrypted.")
     except sqlite3.Error as e:
         print("OK: Plain sqlite3 cannot read DB.")
@@ -67,9 +67,8 @@ def main() -> None:
     password = getpass("Enter SQLCipher passphrase: ")
 
     try:
-        con = open_db(DB_PATH, password)
-        test_counts(con)
-        con.close()
+        with closing(open_db(DB_PATH, password)) as con:
+            test_counts(con)
     except (CDKeysDBError, sqlcipher3.Error) as e:
         print("\nFAILED to open with SQLCipher.")
         print(e)
