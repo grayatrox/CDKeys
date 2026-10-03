@@ -4,8 +4,8 @@ from collections.abc import Iterator
 import pytest
 import sqlcipher3
 
-from cdkeys_db import DBConn, ensure_schema
-from upsert_licenses import redacted_preview, upsert_license
+from cdkeys.db import DBConn, ensure_schema
+from cdkeys.licenses import redacted_preview, upsert_license
 
 
 @pytest.fixture

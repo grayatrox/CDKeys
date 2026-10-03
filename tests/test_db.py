@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import sqlcipher3
 
-from cdkeys_db import (
+from cdkeys.db import (
     DatabaseNotFoundError,
     WrongPassphraseError,
     ensure_schema,

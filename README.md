@@ -4,10 +4,12 @@ An encrypted store for software licence keys. Records live in a
 [SQLCipher](https://www.zetetic.net/sqlcipher/) database (an encrypted SQLite
 file), so the file is unreadable without its passphrase.
 
-- `upsert_licenses.py` adds or updates licences from a JSON file.
-- `verify_cdkeys_db.py` checks that the database opens, shows counts per
-  product, flags product names that differ only by case, and confirms that
-  plain SQLite cannot read the file.
+It is a Python package (`src/cdkeys`) with one command and two subcommands:
+
+- `cdkeys add` adds or updates licences from a JSON file.
+- `cdkeys verify` checks that the database opens, shows counts per product,
+  flags product names that differ only by case, and confirms that plain SQLite
+  cannot read the file.
 
 Each licence's primary key is a SHA-256 digest of the product name plus its key,
 serial number and login, or of a manual `identity` such as an invoice number.
@@ -20,18 +22,28 @@ updates the existing record instead of duplicating it. `assigned_device` and
 
 ## Install
 
-Requires Python 3.12 (see `.python-version`). `sqlcipher3` ships a Windows
-wheel with SQLCipher bundled, so no compiler is needed.
+Requires Python 3.12 or newer (see `.python-version`). There is no separate
+install step: `launch.py` installs what it needs on first start.
+
+```powershell
+python launch.py --help
+```
+
+The first run creates `.venv` and installs the pinned runtime dependency
+(`requirements-runtime.lock`) and the package. Later runs skip this. It
+installs again automatically if `requirements-runtime.lock` or `pyproject.toml`
+changes, and retries on the next start if an install fails. `sqlcipher3` ships
+a Windows wheel with SQLCipher bundled, so no compiler is needed.
+
+For development (adds ruff, mypy and pytest from `requirements.lock`):
 
 ```powershell
 python tasks.py setup
 ```
 
-This creates `.venv` and installs the exact versions in `requirements.lock`.
-
 ## Run
 
-Point the scripts at your database first (see [Configure](#configure)).
+Point cdkeys at your database first (see [Configure](#configure)).
 
 **Add or update licences:**
 
@@ -41,7 +53,7 @@ Point the scripts at your database first (see [Configure](#configure)).
 2. Run:
 
    ```powershell
-   python tasks.py run upsert entries.local.json
+   python launch.py add entries.local.json
    ```
 
    Every entry is validated before the database is opened. The run shows a
@@ -52,15 +64,18 @@ Each entry needs `product_name` plus at least one of `product_key`,
 `serial_number`, `associated_login` or `identity`. The other allowed fields
 are `assigned_device` and `notes`.
 
-If the database file does not exist, the script asks before creating one and
+If the database file does not exist, `add` asks before creating one and
 asks for the new passphrase twice. A wrong passphrase or a missing file exits
 with an error.
 
 **Verify the database:**
 
 ```powershell
-python tasks.py run verify
+python launch.py verify
 ```
+
+Inside the venv the same commands are available as `cdkeys add ...` /
+`cdkeys verify`, or `python -m cdkeys ...`.
 
 ## Test
 
@@ -78,7 +93,7 @@ their own.
 
 | Setting | How to set | Notes |
 |---|---|---|
-| Database path | `--db PATH` on either script, or the `CDKEYS_DB` environment variable | Required. There is no built-in default. `--db` wins over `CDKEYS_DB`. |
+| Database path | `--db PATH` on either subcommand, or the `CDKEYS_DB` environment variable | Required. There is no built-in default. `--db` wins over `CDKEYS_DB`. |
 
 To set it permanently on Windows (takes effect in new terminals):
 
@@ -86,8 +101,8 @@ To set it permanently on Windows (takes effect in new terminals):
 setx CDKEYS_DB "C:\path\to\cd_keys_encrypted.sqlite3"
 ```
 
-`.env.example` documents the variable. The scripts read the process
-environment and do not load `.env` files.
+`.env.example` documents the variable. cdkeys reads the process
+environment and does not load `.env` files.
 
 The cipher settings are fixed at the SQLCipher 4 defaults, which the existing
 database was created with. Opening it with any other key-derivation settings

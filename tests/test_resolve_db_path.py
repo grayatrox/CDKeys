@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from cdkeys_db import ConfigError, resolve_db_path
+from cdkeys.db import ConfigError, resolve_db_path
 
 
 def test_cli_value_wins_over_environment() -> None:

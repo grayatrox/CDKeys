@@ -3,9 +3,9 @@ from collections.abc import Iterator
 import pytest
 import sqlcipher3
 
-from cdkeys_db import DBConn, ensure_schema
-from upsert_licenses import upsert_license
-from verify_cdkeys_db import case_duplicate_products
+from cdkeys.db import DBConn, ensure_schema
+from cdkeys.licenses import upsert_license
+from cdkeys.verify import case_duplicate_products
 
 
 @pytest.fixture

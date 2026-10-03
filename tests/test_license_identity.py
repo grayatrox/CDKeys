@@ -1,6 +1,6 @@
 import pytest
 
-from upsert_licenses import make_license_id
+from cdkeys.licenses import make_license_id
 
 # Golden digests computed from the original script (commit 17517c8). Existing
 # databases key licences by these values; if a test here fails, the v1 payload

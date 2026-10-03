@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from cdkeys_db import ensure_schema, open_db
-from verify_cdkeys_db import test_plaintext_access as check_plaintext_access
+from cdkeys.db import ensure_schema, open_db
+from cdkeys.verify import test_plaintext_access as check_plaintext_access
 
 
 def test_plaintext_check_releases_the_file(

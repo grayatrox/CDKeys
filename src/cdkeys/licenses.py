@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+"""Add or update licences in the encrypted store."""
+
 from __future__ import annotations
 
 import argparse
@@ -12,7 +13,7 @@ from getpass import getpass
 from pathlib import Path
 from pprint import pformat
 
-from cdkeys_db import (
+from cdkeys.db import (
     CDKeysDBError,
     DBConn,
     ensure_schema,
@@ -279,10 +280,11 @@ def load_entries(path: Path) -> list[dict[str, str]]:
     return entries
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, prog: str | None = None) -> None:
     parser = argparse.ArgumentParser(
+        prog=prog,
         description="Insert or update licences from a JSON file "
-        "(see entries.example.json). Keep that file out of git."
+        "(see entries.example.json). Keep that file out of git.",
     )
     parser.add_argument("entries", type=Path, help="path to the entries JSON file")
     parser.add_argument("--db", help="database path (default: $CDKEYS_DB)")
@@ -368,7 +370,3 @@ def redacted_preview(entries: list[dict[str, str]]) -> str:
         redacted.append(cleaned)
 
     return pformat(redacted, width=120, sort_dicts=False)
-
-
-if __name__ == "__main__":
-    main()

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from upsert_licenses import EntriesError, load_entries
+from cdkeys.licenses import EntriesError, load_entries
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

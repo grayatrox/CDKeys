@@ -20,4 +20,4 @@ def test_run_requires_a_known_target(
     args: list[str], capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert tasks.run(args) == 2
-    assert "upsert" in capsys.readouterr().out
+    assert "run {add,verify}" in capsys.readouterr().out

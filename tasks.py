@@ -8,7 +8,7 @@ Project task runner (stdlib only, works on Windows without make/just).
     python tasks.py typecheck   mypy, strict
     python tasks.py test        pytest
     python tasks.py check       fmt --check + lint + typecheck + test (CI)
-    python tasks.py run upsert ENTRIES.json [--db PATH]
+    python tasks.py run add ENTRIES.json [--db PATH]
     python tasks.py run verify [--db PATH]
 """
 
@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
 VENV_PYTHON = VENV / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-RUN_TARGETS = {"upsert": "upsert_licenses.py", "verify": "verify_cdkeys_db.py"}
+RUN_TARGETS = ("add", "verify")
 
 
 def _run(*cmd: str | Path) -> int:
@@ -78,7 +78,7 @@ def run(args: list[str]) -> int:
     if not args or args[0] not in RUN_TARGETS:
         print(f"usage: python tasks.py run {{{','.join(RUN_TARGETS)}}} [args...]")
         return 2
-    return _venv(RUN_TARGETS[args[0]], *args[1:])
+    return _venv("-m", "cdkeys", *args)
 
 
 TASKS: dict[str, Callable[[list[str]], int]] = {

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from upsert_licenses import prompt_passphrase
+from cdkeys.licenses import prompt_passphrase
 
 
 def _answers(*values: str) -> Callable[[str], str]:

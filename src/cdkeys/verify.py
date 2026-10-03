@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+"""Check the licence database opens, is encrypted and is consistent."""
 
 import argparse
 import os
@@ -10,8 +10,8 @@ from pathlib import Path
 
 import sqlcipher3
 
-from cdkeys_db import CDKeysDBError, DBConn, open_db, resolve_db_path
-from upsert_licenses import canon
+from cdkeys.db import CDKeysDBError, DBConn, open_db, resolve_db_path
+from cdkeys.licenses import canon
 
 
 def test_counts(con: DBConn) -> None:
@@ -60,9 +60,10 @@ def test_plaintext_access(db_path: Path) -> None:
         print(f"Error: {e}")
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, prog: str | None = None) -> None:
     parser = argparse.ArgumentParser(
-        description="Check the licence DB opens, is encrypted, and is consistent."
+        prog=prog,
+        description="Check the licence DB opens, is encrypted, and is consistent.",
     )
     parser.add_argument("--db", help="database path (default: $CDKEYS_DB)")
     args = parser.parse_args(argv)
@@ -88,7 +89,3 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     test_plaintext_access(db_path)
-
-
-if __name__ == "__main__":
-    main()
