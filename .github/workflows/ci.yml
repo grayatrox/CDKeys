@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # Every branch: the default branch here is master, not main, and every push
+  # should be checked.
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
