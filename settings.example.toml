@@ -1,6 +1,5 @@
-# cdkeys settings. Copy to your per-user settings file:
-#   Windows:  %APPDATA%\cdkeys\settings.toml
-#   Linux/macOS: ~/.config/cdkeys/settings.toml  (or $XDG_CONFIG_HOME/cdkeys/)
+# cdkeys settings. Copy to settings.toml in the project folder (next to
+# launch.py). Git ignores settings.toml; only this template is tracked.
 # The GUI writes this file for you on first start.
 # --db PATH on the command line overrides it for one run.
 

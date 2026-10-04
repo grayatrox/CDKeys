@@ -4,22 +4,104 @@ import pytest
 
 from cdkeys.db import CDKeysDBError
 from cdkeys.settings import (
+    PROJECT_DIR,
     SettingsError,
+    legacy_settings_path,
     load_settings,
+    locate_settings,
     resolve_db_path,
     save_db_path,
     settings_path,
 )
 
 
-def test_windows_path_is_under_appdata(tmp_path: Path) -> None:
-    path = settings_path({"APPDATA": str(tmp_path)}, platform="win32", home=tmp_path)
+def test_settings_file_is_in_the_project_directory() -> None:
+    # The checkout is backed up; %APPDATA% is not.
+    assert settings_path() == PROJECT_DIR / "settings.toml"
+    assert (PROJECT_DIR / "pyproject.toml").is_file()
+    assert (PROJECT_DIR / "src" / "cdkeys" / "settings.py").is_file()
+
+
+def _legacy_env(tmp_path: Path) -> dict[str, str]:
+    return {"APPDATA": str(tmp_path / "appdata"), "XDG_CONFIG_HOME": str(tmp_path)}
+
+
+def _locate(tmp_path: Path) -> Path:
+    return locate_settings(
+        _legacy_env(tmp_path), project_dir=tmp_path / "proj", home=tmp_path
+    )
+
+
+def _legacy(tmp_path: Path) -> Path:
+    return legacy_settings_path(_legacy_env(tmp_path), home=tmp_path)
+
+
+def test_locate_without_any_settings_returns_project_path(tmp_path: Path) -> None:
+    (tmp_path / "proj").mkdir()
+
+    found = _locate(tmp_path)
+
+    assert found == tmp_path / "proj" / "settings.toml"
+    assert not found.exists()
+
+
+def test_legacy_settings_are_copied_into_the_project(tmp_path: Path) -> None:
+    (tmp_path / "proj").mkdir()
+    save_db_path(_legacy(tmp_path), tmp_path / "keys.sqlite3")
+
+    found = _locate(tmp_path)
+
+    assert found == tmp_path / "proj" / "settings.toml"
+    assert load_settings(found).db_path == tmp_path / "keys.sqlite3"
+    assert _legacy(tmp_path).exists()  # left in place, never deleted
+
+
+def test_relative_legacy_db_path_keeps_pointing_at_the_same_file(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "proj").mkdir()
+    legacy = _legacy(tmp_path)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("db_path = 'keys.sqlite3'\n", encoding="utf-8")
+
+    found = _locate(tmp_path)
+
+    assert load_settings(found).db_path == legacy.parent / "keys.sqlite3"
+
+
+def test_existing_project_settings_are_never_overwritten(tmp_path: Path) -> None:
+    project_file = tmp_path / "proj" / "settings.toml"
+    save_db_path(project_file, tmp_path / "project.sqlite3")
+    save_db_path(_legacy(tmp_path), tmp_path / "legacy.sqlite3")
+
+    found = _locate(tmp_path)
+
+    assert load_settings(found).db_path == tmp_path / "project.sqlite3"
+
+
+def test_invalid_legacy_settings_fail_naming_the_file(tmp_path: Path) -> None:
+    (tmp_path / "proj").mkdir()
+    legacy = _legacy(tmp_path)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("db_path = 5\n", encoding="utf-8")
+
+    with pytest.raises(SettingsError, match="'db_path' must be a string") as err:
+        _locate(tmp_path)
+
+    assert str(legacy) in str(err.value)
+    assert not (tmp_path / "proj" / "settings.toml").exists()
+
+
+def test_windows_legacy_path_is_under_appdata(tmp_path: Path) -> None:
+    path = legacy_settings_path(
+        {"APPDATA": str(tmp_path)}, platform="win32", home=tmp_path
+    )
 
     assert path == tmp_path / "cdkeys" / "settings.toml"
 
 
 def test_windows_without_appdata_falls_back_to_roaming(tmp_path: Path) -> None:
-    path = settings_path({}, platform="win32", home=tmp_path)
+    path = legacy_settings_path({}, platform="win32", home=tmp_path)
 
     assert path == tmp_path / "AppData" / "Roaming" / "cdkeys" / "settings.toml"
 
@@ -27,13 +109,13 @@ def test_windows_without_appdata_falls_back_to_roaming(tmp_path: Path) -> None:
 def test_posix_uses_xdg_config_home(tmp_path: Path) -> None:
     env = {"XDG_CONFIG_HOME": str(tmp_path / "cfg")}
 
-    path = settings_path(env, platform="linux", home=tmp_path)
+    path = legacy_settings_path(env, platform="linux", home=tmp_path)
 
     assert path == tmp_path / "cfg" / "cdkeys" / "settings.toml"
 
 
 def test_posix_defaults_to_dot_config(tmp_path: Path) -> None:
-    path = settings_path({}, platform="linux", home=tmp_path)
+    path = legacy_settings_path({}, platform="linux", home=tmp_path)
 
     assert path == tmp_path / ".config" / "cdkeys" / "settings.toml"
 

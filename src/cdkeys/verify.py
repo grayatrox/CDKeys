@@ -12,7 +12,7 @@ import sqlcipher3
 
 from cdkeys.db import CDKeysDBError, DBConn, open_db
 from cdkeys.licenses import canon
-from cdkeys.settings import resolve_db_path, settings_path
+from cdkeys.settings import locate_settings, resolve_db_path
 
 
 def test_counts(con: DBConn) -> None:
@@ -72,7 +72,7 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> None:
     args = parser.parse_args(argv)
 
     try:
-        db_path = resolve_db_path(args.db, settings_path(os.environ))
+        db_path = resolve_db_path(args.db, locate_settings(os.environ))
     except CDKeysDBError as e:
         print(e)
         sys.exit(1)

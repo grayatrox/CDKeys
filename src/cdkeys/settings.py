@@ -1,8 +1,9 @@
-"""Per-user settings file (``settings.toml``) holding the database path."""
+"""The settings file (``settings.toml``) holding the database path."""
 
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import tomllib
 from collections.abc import Mapping
@@ -24,16 +25,34 @@ class Settings:
     db_path: Path
 
 
-def settings_path(
+# The checkout this package runs from: src/cdkeys/settings.py -> repo root.
+# launch.py and tasks.py both install the package editable (pip install -e),
+# so __file__ is always inside the checkout, never in site-packages.
+PROJECT_DIR = Path(__file__).resolve().parents[2]
+
+logger = logging.getLogger(__name__)
+
+
+def settings_path(project_dir: Path = PROJECT_DIR) -> Path:
+    """
+    Location of the settings file: ``settings.toml`` in the project directory.
+
+    It lives in the checkout (and is gitignored) rather than in %APPDATA%,
+    because the checkout is backed up and %APPDATA% is not.
+    """
+    return project_dir / SETTINGS_FILENAME
+
+
+def user_config_dir(
     environ: Mapping[str, str],
     platform: str = sys.platform,
     home: Path | None = None,
 ) -> Path:
     """
-    Location of the settings file for the current user.
+    The per-user config folder (the GUI log is kept here).
 
-    Windows: %APPDATA%\\cdkeys\\settings.toml. Elsewhere:
-    $XDG_CONFIG_HOME/cdkeys/settings.toml, defaulting to ~/.config.
+    Windows: %APPDATA%\\cdkeys. Elsewhere: $XDG_CONFIG_HOME/cdkeys,
+    defaulting to ~/.config.
     """
     home = Path.home() if home is None else home
     if platform == "win32":
@@ -42,7 +61,39 @@ def settings_path(
     else:
         xdg = environ.get("XDG_CONFIG_HOME")
         base = Path(xdg) if xdg else home / ".config"
-    return base / APP_DIR / SETTINGS_FILENAME
+    return base / APP_DIR
+
+
+def legacy_settings_path(
+    environ: Mapping[str, str],
+    platform: str = sys.platform,
+    home: Path | None = None,
+) -> Path:
+    """Where the settings file lived before it moved to the project directory."""
+    return user_config_dir(environ, platform, home) / SETTINGS_FILENAME
+
+
+def locate_settings(
+    environ: Mapping[str, str],
+    project_dir: Path = PROJECT_DIR,
+    platform: str = sys.platform,
+    home: Path | None = None,
+) -> Path:
+    """
+    The settings file to use, moving an older per-user one into place first.
+
+    If the project has no settings file but the legacy per-user one exists,
+    its ``db_path`` is written to the project file as an absolute path (a
+    relative one was relative to the legacy folder). The legacy file is left
+    as it is, and an existing project file is never overwritten.
+    Raises SettingsError, naming the legacy file, if that file is invalid.
+    """
+    settings_file = settings_path(project_dir)
+    legacy_file = legacy_settings_path(environ, platform, home)
+    if not settings_file.exists() and legacy_file.exists():
+        save_db_path(settings_file, load_settings(legacy_file).db_path)
+        logger.info("Copied settings from %s to %s", legacy_file, settings_file)
+    return settings_file
 
 
 def load_settings(settings_file: Path) -> Settings:

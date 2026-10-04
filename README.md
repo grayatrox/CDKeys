@@ -66,7 +66,8 @@ The window uses the Windows 11 look and follows your light or dark mode.
   re-keys it. **Delete** (Del) asks for confirmation first. Each change is
   saved immediately.
 - If something goes wrong, a message box says so and the details are written
-  to `cdkeys.log` next to the settings file.
+  to `cdkeys.log` in your per-user folder (`%APPDATA%\cdkeys` on Windows,
+  `~/.config/cdkeys` elsewhere).
 - A licence needs a product name plus a product key, serial number or login.
   If it has none of those, give it an identity such as an invoice number.
   Adding a licence that is already stored is refused, not merged.
@@ -119,10 +120,15 @@ their own.
 
 ## Configure
 
-The database path lives in a per-user settings file, outside the repository:
+The database path lives in `settings.toml` in the project folder (next to
+`launch.py`), so it is backed up along with the checkout. Git ignores it;
+only `settings.example.toml` is tracked.
 
-- Windows: `%APPDATA%\cdkeys\settings.toml`
-- Linux/macOS: `~/.config/cdkeys/settings.toml` (or under `$XDG_CONFIG_HOME`)
+Earlier versions kept it in `%APPDATA%\cdkeys\settings.toml` (Linux/macOS:
+`~/.config/cdkeys/settings.toml`). If the project folder has no
+`settings.toml` but that file exists, the next start copies its `db_path`
+into the project folder automatically. The old file is left alone; delete it
+once you are happy.
 
 ```toml
 db_path = 'C:\Users\you\OneDrive\cd_keys_encrypted.sqlite3'

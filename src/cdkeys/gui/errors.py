@@ -1,7 +1,9 @@
 """Error reporting for the GUI, which normally runs without a console.
 
 Unhandled errors are shown in a message box and their tracebacks written to a
-log file next to the settings file, since stderr goes nowhere under pythonw.
+log file in the per-user config folder (see cdkeys.settings.user_config_dir),
+since stderr goes nowhere under pythonw. The log stays out of the project
+directory so it never lands in git.
 Messages never include licence values: store and database errors name
 products and paths only.
 """
@@ -14,7 +16,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import TracebackType
 
-from cdkeys.settings import settings_path
+from cdkeys.settings import user_config_dir
 
 APP_NAME = "CD Key Manager"
 LOG_FILENAME = "cdkeys.log"
@@ -28,7 +30,7 @@ ExceptHook = Callable[
 
 
 def log_path(environ: Mapping[str, str]) -> Path:
-    return settings_path(environ).parent / LOG_FILENAME
+    return user_config_dir(environ) / LOG_FILENAME
 
 
 def configure_logging(path: Path) -> logging.Handler:

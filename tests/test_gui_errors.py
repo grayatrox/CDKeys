@@ -23,7 +23,7 @@ def log_file(tmp_path: Path) -> Iterator[Path]:
     handler.close()
 
 
-def test_log_lives_next_to_the_settings_file(tmp_path: Path) -> None:
+def test_log_lives_in_the_per_user_config_dir(tmp_path: Path) -> None:
     path = log_path({"APPDATA": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path)})
 
     assert path == tmp_path / "cdkeys" / "cdkeys.log"

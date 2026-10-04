@@ -18,7 +18,7 @@ from cdkeys.gui.errors import (
     make_excepthook,
     show_message_box,
 )
-from cdkeys.settings import settings_path
+from cdkeys.settings import locate_settings
 
 
 def main(
@@ -53,7 +53,7 @@ def main(
     # and so does Python for anything that escapes main(), exiting with 1.
     sys.excepthook = make_excepthook(log_file, show)
 
-    settings_file = settings_path(os.environ)
+    settings_file = locate_settings(os.environ)
     target = resolve_plan(plan_startup(args.db, settings_file), settings_file)
     if target is None:
         return 0

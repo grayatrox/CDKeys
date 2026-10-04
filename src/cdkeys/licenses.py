@@ -19,7 +19,7 @@ from cdkeys.db import (
     ensure_schema,
     open_db,
 )
-from cdkeys.settings import resolve_db_path, settings_path
+from cdkeys.settings import locate_settings, resolve_db_path
 
 
 # =========================
@@ -298,7 +298,7 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> None:
     args = parser.parse_args(argv)
 
     try:
-        db_path = resolve_db_path(args.db, settings_path(os.environ))
+        db_path = resolve_db_path(args.db, locate_settings(os.environ))
     except CDKeysDBError as err:
         raise SystemExit(str(err)) from err
 
