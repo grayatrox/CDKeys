@@ -24,7 +24,14 @@ from cdkeys.groups import (
     subgroup_ids,
     ungrouped_product_names,
 )
-from cdkeys.store import LicenceFields, add_licence, delete_licence, list_licences
+from cdkeys.store import (
+    DuplicateLicenceError,
+    LicenceFields,
+    add_licence,
+    delete_licence,
+    list_licences,
+    update_licence,
+)
 
 
 @pytest.fixture
@@ -284,3 +291,112 @@ def test_delete_top_level_group_ungroups_and_keeps_everything_else(
 def test_delete_unknown_group_is_refused(con: DBConn) -> None:
     with pytest.raises(GroupNotFoundError):
         delete_group(con, 999)
+
+
+# --- editing a licence's product (#655) ---------------------------------------
+
+
+def _memberships(con: DBConn) -> set[tuple[str, str]]:
+    rows = con.execute(
+        """
+        SELECT g.name, p.name FROM product_group_member m
+        JOIN product_group g ON g.id = m.group_id
+        JOIN product p ON p.id = m.product_id
+        """
+    ).fetchall()
+    return {(str(group), str(product)) for group, product in rows}
+
+
+def _licence_id(con: DBConn, product: str) -> str:
+    return next(lic.id for lic in list_licences(con) if lic.product_name == product)
+
+
+def test_editing_to_a_new_product_name_keeps_the_licence_in_its_groups(
+    con: DBConn,
+) -> None:
+    ms = create_group(con, "Microsoft")
+    win = create_group(con, "Microsoft Windows", parent_id=ms)
+    pro = create_group(con, "Pro editions")
+    add_product(con, win, _pid(con, "Windows 11"))
+    add_product(con, pro, _pid(con, "Windows 11"))
+
+    update_licence(
+        con,
+        _licence_id(con, "Windows 11"),
+        LicenceFields(product_name="Windows 11 N", product_key="W1"),
+    )
+
+    assert "Windows 11 N" in product_names_under(con, win)
+    assert "Windows 11 N" in product_names_under(con, ms)
+    assert _names(con, pro) == ["Windows 11 N"]
+    assert "Windows 11 N" not in ungrouped_product_names(con)
+
+
+def test_editing_to_an_existing_product_unions_the_groups(con: DBConn) -> None:
+    add_licence(con, LicenceFields(product_name="Windows 11", product_key="W2"))
+    win = create_group(con, "Windows")
+    office = create_group(con, "Office")
+    add_product(con, win, _pid(con, "Windows 11"))
+    add_product(con, office, _pid(con, "Office 2021"))
+    moved = next(lic.id for lic in list_licences(con) if lic.product_key == "W1")
+
+    update_licence(
+        con, moved, LicenceFields(product_name="Office 2021", product_key="W1")
+    )
+
+    # The target keeps its own group and gains the source's; the source, which
+    # still has a licence, loses nothing.
+    assert _memberships(con) == {
+        ("Office", "Office 2021"),
+        ("Windows", "Office 2021"),
+        ("Windows", "Windows 11"),
+    }
+
+
+def test_case_only_rename_changes_no_group_membership(con: DBConn) -> None:
+    win = create_group(con, "Windows")
+    office = create_group(con, "Office")
+    add_product(con, win, _pid(con, "Windows 11"))
+    add_product(con, office, _pid(con, "Office 2021"))
+    before = _memberships(con)
+
+    update_licence(
+        con,
+        _licence_id(con, "Windows 11"),
+        LicenceFields(product_name="WINDOWS 11", product_key="W1"),
+    )
+
+    assert _memberships(con) == before
+
+
+def test_refused_edit_leaves_group_memberships_unchanged(con: DBConn) -> None:
+    win = create_group(con, "Windows")
+    add_product(con, win, _pid(con, "Windows 11"))
+    before = _memberships(con)
+
+    # Office 2021 / O1 is already stored, so the edit collides and is refused.
+    with pytest.raises(DuplicateLicenceError):
+        update_licence(
+            con,
+            _licence_id(con, "Windows 11"),
+            LicenceFields(product_name="Office 2021", product_key="O1"),
+        )
+
+    assert _memberships(con) == before
+
+
+def test_rolled_back_edit_restores_group_memberships(con: DBConn) -> None:
+    win = create_group(con, "Windows")
+    add_product(con, win, _pid(con, "Windows 11"))
+    con.commit()
+    before = _memberships(con)
+
+    update_licence(
+        con,
+        _licence_id(con, "Windows 11"),
+        LicenceFields(product_name="Windows 11 N", product_key="W1"),
+    )
+    con.rollback()
+
+    assert _memberships(con) == before
+    assert [p.name for p in list_products(con)] == ["Game", "Office 2021", "Windows 11"]
