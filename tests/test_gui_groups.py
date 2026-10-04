@@ -222,6 +222,50 @@ def test_add_when_every_product_is_already_in_the_group(con: DBConn) -> None:
     assert script.errors == ["Every product is already in this group."]
 
 
+def test_add_leaves_out_products_already_in_a_subgroup(con: DBConn) -> None:
+    # The group filter counts subgroup members as in the group (#657).
+    ms = create_group(con, "Microsoft")
+    win = create_group(con, "Windows", parent_id=ms)
+    add_product(con, win, _pid(con, "Windows 11"))
+    script = Script()
+    dialog = _dialog(con, script)
+    dialog.select_group(ms)
+
+    dialog.add_products()
+
+    assert script.product_options == ["Game", "Office 2021"]
+
+
+def test_add_offers_parent_group_products_to_a_subgroup(con: DBConn) -> None:
+    ms = create_group(con, "Microsoft")
+    win = create_group(con, "Windows", parent_id=ms)
+    add_product(con, ms, _pid(con, "Windows 11"))
+    script = Script()
+    dialog = _dialog(con, script)
+    dialog.select_group(win)
+
+    dialog.add_products()
+
+    assert script.product_options == PRODUCTS
+
+
+def test_add_when_every_product_is_in_the_group_or_a_subgroup(con: DBConn) -> None:
+    ms = create_group(con, "Microsoft")
+    win = create_group(con, "Windows", parent_id=ms)
+    add_product(con, ms, _pid(con, "Game"))
+    add_product(con, ms, _pid(con, "Office 2021"))
+    add_product(con, win, _pid(con, "Windows 11"))
+    script = Script()
+    dialog = _dialog(con, script)
+    dialog.select_group(ms)
+
+    dialog.add_products()
+
+    assert script.errors == ["Every product is already in this group."]
+    assert script.product_options == []  # the list was never shown
+    assert dialog.product_names() == ["Game", "Office 2021"]
+
+
 def test_remove_selected_products(con: DBConn) -> None:
     gid = create_group(con, "Microsoft")
     for name in ("Office 2021", "Windows 11"):

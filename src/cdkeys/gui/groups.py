@@ -373,7 +373,13 @@ class GroupsDialog(QDialog):
         group = self.selected_group()
         if group is None:
             return
-        members = {p.id for p in products_in_group(self.con, group.id)}
+        # A product in a subgroup already counts as in this group, as in the
+        # main window's filter, so it is not offered again (#657).
+        members = {
+            p.id
+            for gid in (group.id, *subgroup_ids(self.con, group.id))
+            for p in products_in_group(self.con, gid)
+        }
         candidates: dict[str, Product] = {
             p.name: p for p in list_products(self.con) if p.id not in members
         }
