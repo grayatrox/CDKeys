@@ -127,15 +127,6 @@ def _exists(con: DBConn, licence_id: str) -> bool:
     return found.fetchone() is not None
 
 
-def _product_id_of(con: DBConn, licence_id: str) -> int:
-    row = con.execute(
-        "SELECT product_id FROM license WHERE id = ?", (licence_id,)
-    ).fetchone()
-    if row is None:
-        raise LicenceNotFoundError(f"No licence with id {licence_id}")
-    return int(row[0])
-
-
 def licence_id_for(fields: LicenceFields) -> str:
     """The id these fields hash to; raises InvalidLicenceError if they cannot."""
     if not norm(fields.product_name):
@@ -153,20 +144,6 @@ def licence_id_for(fields: LicenceFields) -> str:
             "Enter a product key, serial number or login, or an identity "
             "(e.g. an invoice number) for licences that have none."
         ) from e
-
-
-def _copy_groups(con: DBConn, from_product_id: int, to_product_id: int) -> None:
-    """Add ``to_product_id`` to every group ``from_product_id`` is in (#655).
-
-    Only adds: the target keeps the groups it already had.
-    """
-    con.execute(
-        """
-        INSERT OR IGNORE INTO product_group_member (group_id, product_id)
-        SELECT group_id, ? FROM product_group_member WHERE product_id = ?
-        """,
-        (to_product_id, from_product_id),
-    )
 
 
 def _drop_orphan_products(con: DBConn) -> None:
@@ -233,8 +210,8 @@ def update_licence(
 
     Fields are set exactly as given, so an edit can clear a field. Changing
     the product, key, serial, login or identity changes the id (it is a hash
-    of them); the row is then re-keyed, keeping its created time. Moving it
-    to another product adds that product to the old one's groups.
+    of them); the row is then re-keyed, keeping its created time. It never
+    changes which groups a product is in; that is only done by hand (#656).
 
     Raises LicenceNotFoundError, InvalidLicenceError, DuplicateLicenceError
     (the new id belongs to another licence) or IdentityRequiredError.
@@ -258,12 +235,6 @@ def update_licence(
         )
 
     product_id = get_or_create_product_id(con, fields.product_name)
-    # Groups belong to products, so a licence moved to another product would
-    # otherwise drop out of its groups. Done before the old product can be
-    # dropped as an orphan below.
-    source_product_id = _product_id_of(con, licence_id)
-    if product_id != source_product_id:
-        _copy_groups(con, source_product_id, product_id)
     values = (
         new_id,
         product_id,

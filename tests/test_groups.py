@@ -293,7 +293,7 @@ def test_delete_unknown_group_is_refused(con: DBConn) -> None:
         delete_group(con, 999)
 
 
-# --- editing a licence's product (#655) ---------------------------------------
+# --- editing a licence's product (#655, #656) ---------------------------------
 
 
 def _memberships(con: DBConn) -> set[tuple[str, str]]:
@@ -311,7 +311,7 @@ def _licence_id(con: DBConn, product: str) -> str:
     return next(lic.id for lic in list_licences(con) if lic.product_name == product)
 
 
-def test_editing_to_a_new_product_name_keeps_the_licence_in_its_groups(
+def test_editing_to_a_new_product_name_changes_no_group_membership(
     con: DBConn,
 ) -> None:
     ms = create_group(con, "Microsoft")
@@ -319,6 +319,7 @@ def test_editing_to_a_new_product_name_keeps_the_licence_in_its_groups(
     pro = create_group(con, "Pro editions")
     add_product(con, win, _pid(con, "Windows 11"))
     add_product(con, pro, _pid(con, "Windows 11"))
+    add_product(con, ms, _pid(con, "Office 2021"))
 
     update_licence(
         con,
@@ -326,31 +327,31 @@ def test_editing_to_a_new_product_name_keeps_the_licence_in_its_groups(
         LicenceFields(product_name="Windows 11 N", product_key="W1"),
     )
 
-    assert "Windows 11 N" in product_names_under(con, win)
-    assert "Windows 11 N" in product_names_under(con, ms)
-    assert _names(con, pro) == ["Windows 11 N"]
-    assert "Windows 11 N" not in ungrouped_product_names(con)
+    # Groups change only by hand (#656). The emptied Windows 11 product is
+    # deleted, taking its memberships with it; nothing else changes and the
+    # new product joins no group.
+    assert _memberships(con) == {("Microsoft", "Office 2021")}
+    assert "Windows 11 N" in ungrouped_product_names(con)
 
 
-def test_editing_to_an_existing_product_unions_the_groups(con: DBConn) -> None:
+def test_editing_to_an_existing_product_changes_no_group_membership(
+    con: DBConn,
+) -> None:
     add_licence(con, LicenceFields(product_name="Windows 11", product_key="W2"))
     win = create_group(con, "Windows")
     office = create_group(con, "Office")
     add_product(con, win, _pid(con, "Windows 11"))
     add_product(con, office, _pid(con, "Office 2021"))
+    before = _memberships(con)
     moved = next(lic.id for lic in list_licences(con) if lic.product_key == "W1")
 
     update_licence(
         con, moved, LicenceFields(product_name="Office 2021", product_key="W1")
     )
 
-    # The target keeps its own group and gains the source's; the source, which
-    # still has a licence, loses nothing.
-    assert _memberships(con) == {
-        ("Office", "Office 2021"),
-        ("Windows", "Office 2021"),
-        ("Windows", "Windows 11"),
-    }
+    # Windows 11 still has a licence, so it survives; neither product's
+    # groups change (#656).
+    assert _memberships(con) == before
 
 
 def test_case_only_rename_changes_no_group_membership(con: DBConn) -> None:

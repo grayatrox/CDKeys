@@ -84,9 +84,10 @@ The window uses the Windows 11 look and follows your light or dark mode.
   - Deleting a group never deletes products or licences. Its subgroups move up
     into its parent. Its products can either move up into the parent group or
     be ungrouped from that branch; they keep any other groups they are in.
-  - Editing a licence's product name keeps it in its groups: the product it
-    moves to is added to every group the old product was in, as well as
-    keeping its own.
+  - Editing a licence never changes any group. If you change its product
+    name, it moves to that product and shows in that product's groups (or
+    under **Ungrouped**); move products between groups yourself in
+    **Manage groups**.
   - The **Group** box beside the search shows only the licences in one group
     and its subgroups, or the ones in no group (**Ungrouped**).
 - If something goes wrong, a message box says so and the details are written
