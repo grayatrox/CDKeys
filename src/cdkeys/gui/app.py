@@ -1,4 +1,5 @@
-"""The key manager main window: search, licence table, details, add/edit/delete."""
+"""The key manager main window: search, group filter, licence table, details,
+add/edit/delete."""
 
 from __future__ import annotations
 
@@ -17,10 +18,12 @@ from PySide6.QtGui import QAction, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -34,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from cdkeys.db import DBConn
+from cdkeys.groups import group_tree, product_names_under, ungrouped_product_names
 from cdkeys.gui.editor import MULTILINE, ask_licence
 from cdkeys.gui.format import (
     COLUMNS,
@@ -42,6 +46,7 @@ from cdkeys.gui.format import (
     copied_message,
     row_values,
 )
+from cdkeys.gui.groups import ManageGroups, manage_groups
 from cdkeys.store import (
     Licence,
     LicenceError,
@@ -62,6 +67,10 @@ Confirm = Callable[[QWidget, str], bool]
 ShowError = Callable[[QWidget, str], None]
 
 ModelIndex = QModelIndex | QPersistentModelIndex
+
+# Group filter entries carry None (all licences), UNGROUPED, or a group id.
+UNGROUPED = "ungrouped"
+INDENT = "    "
 
 
 def _confirm(parent: QWidget, message: str) -> bool:
@@ -128,12 +137,14 @@ class KeyManagerWindow(QMainWindow):
         ask: AskLicence = ask_licence,
         confirm: Confirm = _confirm,
         show_error: ShowError = _show_error,
+        manage: ManageGroups = manage_groups,
     ) -> None:
         super().__init__()
         self.con = con
         self.ask = ask
         self.confirm = confirm
         self.show_error = show_error
+        self.manage = manage
         self.selected: Licence | None = None
         self.setWindowTitle(TITLE)
         self.resize(1000, 560)
@@ -175,7 +186,15 @@ class KeyManagerWindow(QMainWindow):
         self.delete_action = QAction("Delete", self)
         self.delete_action.setShortcut(QKeySequence.StandardKey.Delete)
         self.delete_action.triggered.connect(self.delete)
-        for action in (self.add_action, self.edit_action, self.delete_action):
+        self.groups_action = QAction("Groups…", self)
+        self.groups_action.setToolTip("Create groups and choose their products")
+        self.groups_action.triggered.connect(self.manage_groups)
+        for action in (
+            self.add_action,
+            self.edit_action,
+            self.delete_action,
+            self.groups_action,
+        ):
             bar.addAction(action)
         spacer = QWidget()
         spacer.setFixedWidth(16)
@@ -185,6 +204,36 @@ class KeyManagerWindow(QMainWindow):
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(lambda _text: self.refresh())
         bar.addWidget(self.search)
+        group_label = QLabel("  Group: ")
+        bar.addWidget(group_label)
+        self.group_filter = QComboBox()
+        self.group_filter.setToolTip(
+            "Show only licences in this group or its subgroups"
+        )
+        self._fill_group_filter(None)
+        self.group_filter.currentIndexChanged.connect(lambda _i: self.refresh())
+        bar.addWidget(self.group_filter)
+
+    def _fill_group_filter(self, keep: object) -> None:
+        """List the groups, indented by depth, re-selecting ``keep`` if it exists."""
+        self.group_filter.blockSignals(True)
+        self.group_filter.clear()
+        self.group_filter.addItem("All licences", None)
+        self.group_filter.addItem("Ungrouped", UNGROUPED)
+        for group, depth in group_tree(self.con):
+            self.group_filter.addItem(INDENT * depth + group.name, group.id)
+        index = self.group_filter.findData(keep) if keep is not None else 0
+        self.group_filter.setCurrentIndex(max(index, 0))
+        self.group_filter.blockSignals(False)
+
+    def _group_product_names(self) -> set[str] | None:
+        """Product names the group filter allows; None when it allows all."""
+        chosen = self.group_filter.currentData()
+        if chosen == UNGROUPED:
+            return ungrouped_product_names(self.con)
+        if isinstance(chosen, int):
+            return product_names_under(self.con, chosen)
+        return None
 
     def _build_table(self) -> QTableView:
         table = QTableView()
@@ -242,7 +291,11 @@ class KeyManagerWindow(QMainWindow):
     def refresh(self, select_id: str | None = None) -> None:
         """Reload rows from the DB, keeping or setting the selection."""
         keep = select_id or (self.selected.id if self.selected else None)
-        self.model.set_licences(list_licences(self.con, self.search.text()))
+        licences = list_licences(self.con, self.search.text())
+        allowed = self._group_product_names()
+        if allowed is not None:
+            licences = [lic for lic in licences if lic.product_name in allowed]
+        self.model.set_licences(licences)
         row = self.model.row_of(keep) if keep else None
         if row is None:
             self._show(None)
@@ -379,3 +432,9 @@ class KeyManagerWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Deleted licence for {current.product_name}.", STATUS_TIMEOUT_MS
             )
+
+    def manage_groups(self) -> None:
+        """Open the groups dialog, then show the groups it left behind."""
+        self.manage(self, self.con)
+        self._fill_group_filter(self.group_filter.currentData())
+        self.refresh()

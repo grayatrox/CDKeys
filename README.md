@@ -73,6 +73,19 @@ The window uses the Windows 11 look and follows your light or dark mode.
   selected licence; editing the product, key, serial, login or identity
   re-keys it. **Delete** (Del) asks for confirmation first. Each change is
   saved immediately.
+- **Groups…** gathers related products, e.g. a "Microsoft" group holding
+  "Windows" and "Office" groups.
+  - A product can be in any number of groups, and groups can sit inside
+    other groups.
+  - In the dialog, **New group**, **New subgroup**, **Rename**, **Move** and
+    **Delete** act on the selected group. **Add products** and **Remove**
+    choose which products it holds.
+  - Group names must be unique, ignoring case.
+  - Deleting a group never deletes products or licences. Its subgroups move up
+    into its parent. Its products can either move up into the parent group or
+    be ungrouped from that branch; they keep any other groups they are in.
+  - The **Group** box beside the search shows only the licences in one group
+    and its subgroups, or the ones in no group (**Ungrouped**).
 - If something goes wrong, a message box says so and the details are written
   to `cdkeys.log` in your per-user folder (`%APPDATA%\cdkeys` on Windows,
   `~/.config/cdkeys` elsewhere).
