@@ -11,10 +11,25 @@ build/
 
 # Local config / secrets
 .env
+.env.*
+!.env.example
+# The real per-user settings file; only settings.example.toml is tracked
+settings.toml
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
 
-# Databases (never commit key stores)
+# Databases (never commit key stores), including SQLite's -wal/-shm/-journal
+# sidecars, which can hold decrypted pages, and backup copies
+*.sqlite
 *.sqlite3
 *.db
+*.sqlite-*
+*.sqlite3-*
+*.db-*
+*.bak
 
 # Licence entry files hold plaintext keys; only the template is tracked
 entries*.json
