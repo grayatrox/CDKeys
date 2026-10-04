@@ -1,8 +1,8 @@
-import tkinter as tk
-from collections.abc import Callable, Iterator
-from tkinter import messagebox
+from collections.abc import Callable
 
 import pytest
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
 
 from cdkeys.gui.editor import (
     LicenceDialog,
@@ -70,53 +70,44 @@ def test_validate_form_accepts_any_identifying_field(values: dict[str, str]) -> 
     assert validate_form(_values(**values)) is None
 
 
-# --- the real modal dialog, driven with Tk timers ---------------------------
-
-
-@pytest.fixture
-def root() -> Iterator[tk.Tk]:
-    r = tk.Tk()
-    r.withdraw()
-    yield r
-    r.destroy()
+# --- the real modal dialog ----------------------------------------------------
 
 
 def _open_dialog(
-    root: tk.Tk, initial: LicenceFields | None, script: Callable[[LicenceDialog], None]
+    initial: LicenceFields | None, script: Callable[[LicenceDialog], None]
 ) -> LicenceFields | None:
-    """Open the dialog; ``script`` runs once it is showing."""
+    """Open the modal dialog via ask_licence; ``script`` runs once it shows."""
 
     def drive() -> None:
-        dialogs = [w for w in root.winfo_children() if isinstance(w, LicenceDialog)]
-        if not dialogs:
-            root.after(20, drive)
+        dialog = QApplication.activeModalWidget()
+        if not isinstance(dialog, LicenceDialog):
+            QTimer.singleShot(10, drive)
             return
-        script(dialogs[0])
+        script(dialog)
 
-    root.after(20, drive)
-    return ask_licence(root, "Edit licence", initial)
+    QTimer.singleShot(0, drive)
+    return ask_licence(None, "Edit licence", initial)
 
 
 def _type(dialog: LicenceDialog, **values: str) -> None:
     for name, value in values.items():
         if name == "notes":
-            dialog.notes.delete("1.0", "end")
-            dialog.notes.insert("1.0", value)
+            dialog.notes.setPlainText(value)
         else:
-            dialog.entries[name].delete(0, "end")
-            dialog.entries[name].insert(0, value)
+            dialog.entries[name].setText(value)
 
 
-def test_dialog_prefills_and_returns_edited_fields(root: tk.Tk) -> None:
+@pytest.mark.usefixtures("qapp")
+def test_dialog_prefills_and_returns_edited_fields() -> None:
     initial = LicenceFields(product_name="Office", product_key="K1", notes="a\nb")
     seen: dict[str, str] = {}
 
     def script(dialog: LicenceDialog) -> None:
         seen.update(dialog.values())
         _type(dialog, assigned_device="laptop", notes="new notes")
-        dialog.ok()
+        dialog.accept()
 
-    result = _open_dialog(root, initial, script)
+    result = _open_dialog(initial, script)
 
     assert seen["product_key"] == "K1"
     assert seen["notes"] == "a\nb"
@@ -128,24 +119,21 @@ def test_dialog_prefills_and_returns_edited_fields(root: tk.Tk) -> None:
     )
 
 
-def test_dialog_refuses_invalid_input_then_cancel_returns_none(
-    root: tk.Tk, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    warnings: list[str] = []
-    monkeypatch.setattr(
-        messagebox, "showwarning", lambda _t, msg, **_k: warnings.append(msg)
-    )
-    still_open: list[bool] = []
+@pytest.mark.usefixtures("qapp")
+def test_dialog_explains_invalid_input_stays_open_then_cancel() -> None:
+    observed: dict[str, object] = {}
 
     def script(dialog: LicenceDialog) -> None:
         _type(dialog, product_name="Office")  # no key, serial, login or identity
-        dialog.ok()
-        still_open.append(bool(dialog.winfo_exists()))
-        dialog.cancel()
+        dialog.accept()
+        observed["visible"] = dialog.isVisible()
+        observed["problem"] = dialog.problem.text()
+        observed["problem_shown"] = not dialog.problem.isHidden()
+        dialog.reject()
 
-    result = _open_dialog(root, None, script)
+    result = _open_dialog(None, script)
 
     assert result is None
-    assert still_open == [True]
-    assert len(warnings) == 1
-    assert "Enter a product key" in warnings[0]
+    assert observed["visible"] is True
+    assert observed["problem_shown"] is True
+    assert "Enter a product key" in str(observed["problem"])

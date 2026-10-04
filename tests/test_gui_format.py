@@ -43,7 +43,8 @@ def _lic(**kw: str | None) -> Licence:
         ("", ""),
         ("ABCD", MASK * 4),
         ("ABCDEFGH", MASK * 8),
-        ("ABCDE-12345-WXYZ", MASK * 12 + "WXYZ"),
+        ("ABCDE-12345-WXYZ", MASK * 6 + "WXYZ"),
+        ("A" * 40 + "WXYZ", MASK * 6 + "WXYZ"),  # length not revealed
     ],
 )
 def test_mask_secret(value: str | None, expected: str) -> None:
@@ -75,12 +76,12 @@ def test_row_values_mask_the_key_and_follow_column_order() -> None:
     values = row_values(lic)
 
     assert len(values) == len(COLUMNS)
-    assert values == ("Office", MASK * 13 + "CCCC", "laptop", "me@x", "boxed")
+    assert values == ("Office", MASK * 6 + "CCCC", "laptop", "me@x", "boxed")
     assert "AAAAA" not in "".join(values)
 
 
 def test_row_values_fall_back_to_masked_serial() -> None:
-    assert row_values(_lic(serial_number="SN-123456789"))[1] == MASK * 8 + "6789"
+    assert row_values(_lic(serial_number="SN-123456789"))[1] == MASK * 6 + "6789"
 
 
 def test_copied_message_never_contains_the_value() -> None:

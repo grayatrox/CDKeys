@@ -1,4 +1,4 @@
-"""Pure display helpers for the GUI (no tkinter, so they are unit-testable)."""
+"""Pure display helpers for the GUI (no Qt, so they are unit-testable alone)."""
 
 from __future__ import annotations
 
@@ -29,16 +29,21 @@ COLUMNS: tuple[tuple[str, str], ...] = (
 NOTES_PREVIEW = 40
 
 
+MASK_PREFIX = 6
+
+
 def mask_secret(value: str | None, visible: int = 4) -> str:
     """Hide all but the last ``visible`` characters (all of short values).
 
-    Enough to tell keys apart in a list without exposing them on screen.
+    Enough to tell keys apart in a list without exposing them on screen. The
+    prefix is a fixed length so long keys stay narrow and their length is
+    not revealed.
     """
     if not value:
         return ""
     if len(value) <= visible * 2:
         return MASK * len(value)
-    return MASK * (len(value) - visible) + value[-visible:]
+    return MASK * MASK_PREFIX + value[-visible:]
 
 
 def notes_preview(notes: str | None, limit: int = NOTES_PREVIEW) -> str:

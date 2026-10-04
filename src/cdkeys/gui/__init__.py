@@ -1,16 +1,36 @@
-"""Desktop key manager (tkinter): ``cdkeys gui``."""
+"""Desktop key manager (Qt).
+
+Started by double-clicking "CD Key Manager.pyw", or ``cdkeys-gui`` /
+``python -m cdkeys.gui`` / ``cdkeys gui``.
+"""
 
 from __future__ import annotations
 
 import argparse
 import os
-import tkinter as tk
+import sys
 from contextlib import closing
 
+from cdkeys.gui.errors import (
+    ShowMessage,
+    configure_logging,
+    log_path,
+    make_excepthook,
+    show_message_box,
+)
 from cdkeys.settings import settings_path
 
 
-def main(argv: list[str] | None = None, prog: str | None = None) -> None:
+def main(
+    argv: list[str] | None = None,
+    prog: str | None = None,
+    show: ShowMessage = show_message_box,
+) -> int:
+    """Open the key manager; returns the process exit code.
+
+    Unhandled errors are logged and shown in a message box (see
+    cdkeys.gui.errors), as there is usually no console to print them to.
+    """
     parser = argparse.ArgumentParser(
         prog=prog, description="Open the CD key manager window."
     )
@@ -19,32 +39,29 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    # Imported here so the CLI subcommands never need a display.
-    from cdkeys.gui.app import KeyManagerApp
-    from cdkeys.gui.startup import plan_startup, resolve_plan, unlock
+    # Imported here so the CLI subcommands never need Qt.
+    from PySide6.QtWidgets import QApplication
 
-    root = tk.Tk()
-    root.withdraw()  # only dialogs until the database is unlocked
-    destroyed = False
+    from cdkeys.gui.app import KeyManagerWindow
+    from cdkeys.gui.startup import APP_NAME, plan_startup, resolve_plan, unlock
 
-    def on_destroy(event: tk.Event[tk.Misc]) -> None:
-        nonlocal destroyed
-        if event.widget is root:
-            destroyed = True
+    log_file = log_path(os.environ)
+    configure_logging(log_file)
+    app = QApplication.instance() or QApplication([sys.argv[0]])
+    app.setApplicationName(APP_NAME)
+    # Installed for the life of the process: Qt routes errors in slots here,
+    # and so does Python for anything that escapes main(), exiting with 1.
+    sys.excepthook = make_excepthook(log_file, show)
 
-    root.bind("<Destroy>", on_destroy, add="+")
-    try:
-        settings_file = settings_path(os.environ)
-        target = resolve_plan(root, plan_startup(args.db, settings_file), settings_file)
-        if target is None:
-            return
-        con = unlock(root, target)
-        if con is None:
-            return
-        with closing(con):
-            KeyManagerApp(root, con, target.path)
-            root.deiconify()
-            root.mainloop()
-    finally:
-        if not destroyed:  # closing the window already destroyed it
-            root.destroy()
+    settings_file = settings_path(os.environ)
+    target = resolve_plan(plan_startup(args.db, settings_file), settings_file)
+    if target is None:
+        return 0
+    con = unlock(target)
+    if con is None:
+        return 0
+    with closing(con):
+        window = KeyManagerWindow(con, target.path)
+        window.show()
+        app.exec()
+    return 0

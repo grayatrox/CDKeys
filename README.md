@@ -30,11 +30,13 @@ window opens. The first start shows a small "Setting up CD Key Manager" window
 while it installs what it needs, then opens the key manager. If setup fails,
 a message box shows why, and the next start tries again.
 
-The first run creates `.venv` and installs the pinned runtime dependency
-(`requirements-runtime.lock`) and the package. Later runs skip this. It
-installs again automatically if `requirements-runtime.lock` or `pyproject.toml`
-changes, and retries on the next start if an install fails. `sqlcipher3` ships
-a Windows wheel with SQLCipher bundled, so no compiler is needed.
+The first run creates `.venv` and installs the pinned runtime dependencies
+(`requirements-runtime.lock`): the Qt GUI toolkit (PySide6, roughly 200 MB
+installed, so allow a minute or two) and SQLCipher. Later runs skip this and
+open straight away. It installs again automatically if
+`requirements-runtime.lock` or `pyproject.toml` changes, and retries on the
+next start if an install fails. Both ship Windows wheels, so no compiler is
+needed.
 
 For development (adds ruff, mypy and pytest from `requirements.lock`):
 
@@ -51,15 +53,20 @@ On first start it asks whether to open an existing database or create a new
 one, and saves the choice to the settings file (see [Configure](#configure)).
 It then asks for the passphrase; a new database asks for it twice.
 
-- **Search** filters as you type, across every field.
+The window uses the Windows 11 look and follows your light or dark mode.
+
+- **Search** filters as you type, across every field. Click a column heading
+  to sort.
 - The table masks keys and serials down to their last four characters. The
   details pane on the right shows the selected licence, with **Copy** beside
   each field. Tick **Show key and serial** to reveal them there. The status bar
   says what was copied, never the value.
-- **Add…** opens a form. **Edit…** (or double-click) changes the selected
-  licence; editing the product, key, serial, login or identity re-keys it.
-  **Delete** (or the Delete key) asks for confirmation first. Each change is
+- **Add** (Ctrl+N) opens a form. **Edit** (F2 or double-click) changes the
+  selected licence; editing the product, key, serial, login or identity
+  re-keys it. **Delete** (Del) asks for confirmation first. Each change is
   saved immediately.
+- If something goes wrong, a message box says so and the details are written
+  to `cdkeys.log` next to the settings file.
 - A licence needs a product name plus a product key, serial number or login.
   If it has none of those, give it an identity such as an invoice number.
   Adding a licence that is already stored is refused, not merged.

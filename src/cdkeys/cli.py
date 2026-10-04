@@ -9,10 +9,12 @@ from cdkeys import licenses, verify
 
 
 def _gui(argv: list[str], prog: str) -> None:
-    # Imported on demand so add/verify work on a Python built without tkinter.
+    # Imported on demand so add/verify never load Qt.
     from cdkeys import gui
 
-    gui.main(argv, prog)
+    code = gui.main(argv, prog)
+    if code:
+        raise SystemExit(code)
 
 
 COMMANDS: dict[str, tuple[Callable[[list[str], str], None], str]] = {

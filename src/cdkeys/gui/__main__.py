@@ -1,3 +1,3 @@
 from cdkeys.gui import main
 
-main()
+raise SystemExit(main())

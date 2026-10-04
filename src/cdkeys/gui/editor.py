@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
-import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from cdkeys.gui.format import DETAIL_FIELDS
 from cdkeys.licenses import norm
@@ -46,53 +54,72 @@ def validate_form(values: dict[str, str]) -> str | None:
     return None
 
 
-class LicenceDialog(simpledialog.Dialog):
-    """Modal add/edit form. ``result_fields`` is None if cancelled."""
+class LicenceDialog(QDialog):
+    """Modal add/edit form. ``result_fields`` is set when accepted."""
 
     def __init__(
-        self, parent: tk.Misc, title: str, initial: LicenceFields | None
+        self, parent: QWidget | None, title: str, initial: LicenceFields | None
     ) -> None:
-        self.initial = form_values(initial)
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(460)
         self.result_fields: LicenceFields | None = None
-        self.entries: dict[str, ttk.Entry] = {}
-        super().__init__(parent, title)
+        self.entries: dict[str, QLineEdit] = {}
 
-    def body(self, master: tk.Frame) -> tk.Widget:
-        for row, (name, label) in enumerate(DETAIL_FIELDS):
-            ttk.Label(master, text=label + ":").grid(
-                row=row, column=0, sticky="nw", pady=2
-            )
+        form = QFormLayout()
+        start = form_values(initial)
+        for name, label in DETAIL_FIELDS:
             if name == MULTILINE:
-                self.notes = tk.Text(master, width=48, height=4, wrap="word")
-                self.notes.insert("1.0", self.initial[name])
-                self.notes.grid(row=row, column=1, pady=2, sticky="ew")
+                self.notes = QPlainTextEdit(start[name])
+                self.notes.setFixedHeight(80)
+                form.addRow(label, self.notes)
             else:
-                entry = ttk.Entry(master, width=48)
-                entry.insert(0, self.initial[name])
-                entry.grid(row=row, column=1, pady=2, sticky="ew")
+                entry = QLineEdit(start[name])
+                entry.setClearButtonEnabled(True)
+                form.addRow(label, entry)
                 self.entries[name] = entry
-        ttk.Label(master, text=HINT, wraplength=420, foreground="gray").grid(
-            row=len(DETAIL_FIELDS), column=0, columnspan=2, sticky="w", pady=(6, 0)
+
+        hint = QLabel(HINT)
+        hint.setWordWrap(True)
+        hint.setEnabled(False)  # rendered in the theme's muted colour
+        self.problem = QLabel()
+        self.problem.setWordWrap(True)
+        self.problem.setObjectName("problem")
+        self.problem.setStyleSheet("color: #c42b1c;")
+        self.problem.hide()
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
         )
-        return self.entries["product_name"]
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(hint)
+        layout.addWidget(self.problem)
+        layout.addWidget(buttons)
+        self.entries["product_name"].setFocus()
 
     def values(self) -> dict[str, str]:
-        values = {name: entry.get() for name, entry in self.entries.items()}
-        values[MULTILINE] = self.notes.get("1.0", "end-1c")
+        values = {name: entry.text() for name, entry in self.entries.items()}
+        values[MULTILINE] = self.notes.toPlainText()
         return values
 
-    def validate(self) -> bool:
+    def accept(self) -> None:
         problem = validate_form(self.values())
         if problem:
-            messagebox.showwarning("Licence", problem, parent=self)
-            return False
-        return True
-
-    def apply(self) -> None:
+            self.problem.setText(problem)
+            self.problem.show()
+            return
         self.result_fields = fields_from_form(self.values())
+        super().accept()
 
 
 def ask_licence(
-    parent: tk.Misc, title: str, initial: LicenceFields | None
+    parent: QWidget | None, title: str, initial: LicenceFields | None
 ) -> LicenceFields | None:
-    return LicenceDialog(parent, title, initial).result_fields
+    dialog = LicenceDialog(parent, title, initial)
+    dialog.exec()
+    return dialog.result_fields

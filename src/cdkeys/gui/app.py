@@ -2,18 +2,42 @@
 
 from __future__ import annotations
 
-import tkinter as tk
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from tkinter import messagebox, ttk
+
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QModelIndex,
+    QPersistentModelIndex,
+    QSortFilterProxyModel,
+    Qt,
+)
+from PySide6.QtGui import QAction, QGuiApplication, QKeySequence
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QSplitter,
+    QTableView,
+    QToolBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from cdkeys.db import DBConn
-from cdkeys.gui.editor import ask_licence
+from cdkeys.gui.editor import MULTILINE, ask_licence
 from cdkeys.gui.format import (
     COLUMNS,
     DETAIL_FIELDS,
-    MASK,
     SECRET_FIELDS,
     copied_message,
     row_values,
@@ -29,192 +53,261 @@ from cdkeys.store import (
     update_licence,
 )
 
-PAD = 6
 TITLE = "CD Key Manager"
+STATUS_TIMEOUT_MS = 5000
 
 # Injected so tests can drive the window without blocking modal dialogs.
-AskLicence = Callable[[tk.Misc, str, LicenceFields | None], LicenceFields | None]
-Confirm = Callable[[tk.Misc, str], bool]
-ShowError = Callable[[tk.Misc, str], None]
+AskLicence = Callable[[QWidget | None, str, LicenceFields | None], LicenceFields | None]
+Confirm = Callable[[QWidget, str], bool]
+ShowError = Callable[[QWidget, str], None]
+
+ModelIndex = QModelIndex | QPersistentModelIndex
 
 
-def _confirm(parent: tk.Misc, message: str) -> bool:
-    return messagebox.askyesno(TITLE, message, parent=parent)
+def _confirm(parent: QWidget, message: str) -> bool:
+    answer = QMessageBox.question(parent, TITLE, message)
+    return answer == QMessageBox.StandardButton.Yes
 
 
-def _show_error(parent: tk.Misc, message: str) -> None:
-    messagebox.showerror(TITLE, message, parent=parent)
+def _show_error(parent: QWidget, message: str) -> None:
+    QMessageBox.warning(parent, TITLE, message)
 
 
-class KeyManagerApp(ttk.Frame):
-    """Main window contents. The caller owns ``con`` and closes it."""
+class LicenceTableModel(QAbstractTableModel):
+    """Rows of licences, displayed with secrets masked (see row_values)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.licences: list[Licence] = []
+
+    def set_licences(self, licences: list[Licence]) -> None:
+        self.beginResetModel()
+        self.licences = licences
+        self.endResetModel()
+
+    def rowCount(self, parent: ModelIndex | None = None) -> int:
+        return 0 if parent is not None and parent.isValid() else len(self.licences)
+
+    def columnCount(self, parent: ModelIndex | None = None) -> int:
+        return 0 if parent is not None and parent.isValid() else len(COLUMNS)
+
+    def data(
+        self, index: ModelIndex, role: int = Qt.ItemDataRole.DisplayRole
+    ) -> object:
+        if role == Qt.ItemDataRole.DisplayRole and index.isValid():
+            return row_values(self.licences[index.row()])[index.column()]
+        return None
+
+    def headerData(
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role: int = Qt.ItemDataRole.DisplayRole,
+    ) -> object:
+        if (
+            role == Qt.ItemDataRole.DisplayRole
+            and orientation == Qt.Orientation.Horizontal
+        ):
+            return COLUMNS[section][1]
+        return None
+
+    def row_of(self, licence_id: str) -> int | None:
+        for row, lic in enumerate(self.licences):
+            if lic.id == licence_id:
+                return row
+        return None
+
+
+class KeyManagerWindow(QMainWindow):
+    """Main window. The caller owns ``con`` and closes it."""
 
     def __init__(
         self,
-        master: tk.Tk,
         con: DBConn,
         db_path: Path,
         ask: AskLicence = ask_licence,
         confirm: Confirm = _confirm,
         show_error: ShowError = _show_error,
     ) -> None:
-        super().__init__(master, padding=PAD)
+        super().__init__()
         self.con = con
         self.ask = ask
         self.confirm = confirm
         self.show_error = show_error
         self.selected: Licence | None = None
-        self.search_var = tk.StringVar(master=self)
-        self.status_var = tk.StringVar(master=self, value=f"Database: {db_path}")
-        self.show_secrets = tk.BooleanVar(master=self, value=False)
-        self.detail_vars = {
-            name: tk.StringVar(master=self) for name, _ in DETAIL_FIELDS
-        }
-        self.detail_entries: dict[str, ttk.Entry] = {}
-
-        master.title(TITLE)
-        master.minsize(760, 480)
-        self.grid(sticky="nsew")
-        master.columnconfigure(0, weight=1)
-        master.rowconfigure(0, weight=1)
+        self.setWindowTitle(TITLE)
+        self.resize(1000, 560)
 
         self._build_toolbar()
-        self._build_table()
-        self._build_details()
-        ttk.Label(self, textvariable=self.status_var, anchor="w").grid(
-            row=3, column=0, columnspan=2, sticky="ew", pady=(PAD, 0)
-        )
-        self.columnconfigure(0, weight=3)
-        self.columnconfigure(1, weight=2)
-        self.rowconfigure(1, weight=1)
+        self.model = LicenceTableModel()
+        self.proxy = QSortFilterProxyModel(self)
+        self.proxy.setSourceModel(self.model)
+        self.proxy.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.table = self._build_table()
+        details = self._build_details()
 
-        self.search_var.trace_add("write", lambda *_: self.refresh())
+        splitter = QSplitter()
+        splitter.addWidget(self.table)
+        splitter.addWidget(details)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([640, 420])
+        self.setCentralWidget(splitter)
+        self.statusBar().showMessage(f"Database: {db_path}")
+
         self.refresh()
+        # Fit columns to the data once; after that the user's widths stand.
+        self.table.resizeColumnsToContents()
 
     # --- layout -------------------------------------------------------------
 
     def _build_toolbar(self) -> None:
-        self.toolbar = ttk.Frame(self)
-        self.toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, PAD))
-        ttk.Button(self.toolbar, text="Add…", command=self.add).pack(side="left")
-        self.edit_button = ttk.Button(
-            self.toolbar, text="Edit…", command=self.edit, state="disabled"
-        )
-        self.edit_button.pack(side="left", padx=(PAD, 0))
-        self.delete_button = ttk.Button(
-            self.toolbar, text="Delete", command=self.delete, state="disabled"
-        )
-        self.delete_button.pack(side="left", padx=(PAD, PAD * 3))
-        ttk.Label(self.toolbar, text="Search:").pack(side="left")
-        self.search_entry = ttk.Entry(self.toolbar, textvariable=self.search_var)
-        self.search_entry.pack(side="left", fill="x", expand=True, padx=(PAD, 0))
+        bar = QToolBar("Actions")
+        bar.setMovable(False)
+        bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.addToolBar(bar)
+        self.add_action = QAction("Add…", self)
+        self.add_action.setShortcut(QKeySequence.StandardKey.New)
+        self.add_action.triggered.connect(self.add)
+        self.edit_action = QAction("Edit…", self)
+        self.edit_action.setShortcut(QKeySequence("F2"))
+        self.edit_action.triggered.connect(self.edit)
+        self.delete_action = QAction("Delete", self)
+        self.delete_action.setShortcut(QKeySequence.StandardKey.Delete)
+        self.delete_action.triggered.connect(self.delete)
+        for action in (self.add_action, self.edit_action, self.delete_action):
+            bar.addAction(action)
+        spacer = QWidget()
+        spacer.setFixedWidth(16)
+        bar.addWidget(spacer)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search all fields…")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(lambda _text: self.refresh())
+        bar.addWidget(self.search)
 
-    def _build_table(self) -> None:
-        frame = ttk.Frame(self)
-        frame.grid(row=1, column=0, sticky="nsew", padx=(0, PAD))
-        frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(0, weight=1)
-        self.tree = ttk.Treeview(
-            frame,
-            columns=[cid for cid, _ in COLUMNS],
-            show="headings",
-            selectmode="browse",
+    def _build_table(self) -> QTableView:
+        table = QTableView()
+        table.setModel(self.proxy)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSortingEnabled(True)
+        table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().hide()
+        table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Interactive
         )
-        for cid, heading in COLUMNS:
-            self.tree.heading(cid, text=heading)
-            self.tree.column(cid, width=120, stretch=True)
-        scroll = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scroll.set)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        scroll.grid(row=0, column=1, sticky="ns")
-        self.tree.bind("<<TreeviewSelect>>", lambda _e: self._on_select())
-        self.tree.bind("<Double-1>", lambda _e: self.edit())
-        self.tree.bind("<Delete>", lambda _e: self.delete())
+        table.horizontalHeader().setStretchLastSection(True)
+        table.selectionModel().selectionChanged.connect(
+            lambda *_args: self._on_select()
+        )
+        table.doubleClicked.connect(lambda _index: self.edit())
+        return table
 
-    def _build_details(self) -> None:
-        box = ttk.LabelFrame(self, text="Details", padding=PAD)
-        box.grid(row=1, column=1, sticky="nsew")
-        box.columnconfigure(1, weight=1)
-        for row, (name, label) in enumerate(DETAIL_FIELDS):
-            ttk.Label(box, text=label + ":").grid(row=row, column=0, sticky="w")
-            entry = ttk.Entry(
-                box, textvariable=self.detail_vars[name], state="readonly"
-            )
-            entry.grid(row=row, column=1, sticky="ew", padx=PAD, pady=2)
-            self.detail_entries[name] = entry
-            ttk.Button(
-                box,
-                text="Copy",
-                width=6,
-                command=partial(self.copy_field, name, label),
-            ).grid(row=row, column=2, pady=2)
-        ttk.Checkbutton(
-            box,
-            text="Show key and serial",
-            variable=self.show_secrets,
-            command=self._apply_secret_visibility,
-        ).grid(row=len(DETAIL_FIELDS), column=1, sticky="w", pady=(PAD, 0))
+    def _build_details(self) -> QGroupBox:
+        box = QGroupBox("Details")
+        form = QFormLayout()
+        self.fields: dict[str, QLineEdit | QPlainTextEdit] = {}
+        for name, label in DETAIL_FIELDS:
+            field: QLineEdit | QPlainTextEdit
+            if name == MULTILINE:
+                field = QPlainTextEdit()
+                field.setReadOnly(True)
+                field.setFixedHeight(72)
+            else:
+                field = QLineEdit()
+                field.setReadOnly(True)
+            copy = QToolButton()
+            copy.setText("Copy")
+            copy.setToolTip(f"Copy {label.lower()} to the clipboard")
+            copy.clicked.connect(partial(self.copy_field, name, label))
+            row = QHBoxLayout()
+            row.addWidget(field)
+            row.addWidget(copy)
+            form.addRow(label, row)
+            self.fields[name] = field
+        self.show_secrets = QCheckBox("Show key and serial")
+        self.show_secrets.toggled.connect(lambda _on: self._apply_secret_visibility())
+        layout = QVBoxLayout(box)
+        layout.addLayout(form)
+        layout.addWidget(self.show_secrets)
+        layout.addStretch()
         self._apply_secret_visibility()
+        return box
 
     # --- behaviour ----------------------------------------------------------
 
     def refresh(self, select_id: str | None = None) -> None:
-        """Reload the table from the DB, keeping or setting the selection."""
+        """Reload rows from the DB, keeping or setting the selection."""
         keep = select_id or (self.selected.id if self.selected else None)
-        self.tree.delete(*self.tree.get_children())
-        for lic in list_licences(self.con, self.search_var.get()):
-            self.tree.insert("", "end", iid=lic.id, values=row_values(lic))
-        if keep and self.tree.exists(keep):
-            # Show it now rather than waiting for the queued select event, so
-            # the details are current as soon as refresh returns.
-            self._show(get_licence(self.con, keep))
-            self.tree.selection_set(keep)
-            self.tree.see(keep)
-        else:
+        self.model.set_licences(list_licences(self.con, self.search.text()))
+        row = self.model.row_of(keep) if keep else None
+        if row is None:
             self._show(None)
+            return
+        view_index = self.proxy.mapFromSource(self.model.index(row, 0))
+        self.table.selectRow(view_index.row())
+        self.table.scrollTo(view_index)
+        self._show(self.model.licences[row])
 
     def _on_select(self) -> None:
-        selection = self.tree.selection()
-        if not selection:
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
             self._show(None)
-        elif self.selected is None or selection[0] != self.selected.id:
-            self._show(get_licence(self.con, selection[0]))
+            return
+        source = self.proxy.mapToSource(rows[0])
+        lic = self.model.licences[source.row()]
+        if self.selected is None or lic.id != self.selected.id:
+            self._show(get_licence(self.con, lic.id))
 
     def _show(self, lic: Licence | None) -> None:
         self.selected = lic
-        state = "normal" if lic else "disabled"
-        self.edit_button.configure(state=state)
-        self.delete_button.configure(state=state)
-        for name, _ in DETAIL_FIELDS:
-            value = getattr(lic, name) if lic else None
-            self.detail_vars[name].set(value or "")
+        for name, field in self.fields.items():
+            value = (getattr(lic, name) if lic else None) or ""
+            if isinstance(field, QPlainTextEdit):
+                field.setPlainText(value)
+            else:
+                field.setText(value)
+        self.edit_action.setEnabled(lic is not None)
+        self.delete_action.setEnabled(lic is not None)
 
     def _apply_secret_visibility(self) -> None:
-        show = "" if self.show_secrets.get() else MASK
+        mode = (
+            QLineEdit.EchoMode.Normal
+            if self.show_secrets.isChecked()
+            else QLineEdit.EchoMode.Password
+        )
         for name in SECRET_FIELDS:
-            self.detail_entries[name].configure(show=show)
+            field = self.fields[name]
+            if isinstance(field, QLineEdit):
+                field.setEchoMode(mode)
+
+    def status(self) -> str:
+        return self.statusBar().currentMessage()
 
     def copy_field(self, name: str, label: str) -> None:
         """Put one field of the selected licence on the clipboard."""
         lic = self.selected
-        value = getattr(lic, name) if lic else None
         if lic is None:
-            self.status_var.set("Select a licence first.")
+            self.statusBar().showMessage("Select a licence first.", STATUS_TIMEOUT_MS)
             return
+        value = getattr(lic, name)
         if not value:
-            self.status_var.set(f"{lic.product_name} has no {label.lower()}.")
+            self.statusBar().showMessage(
+                f"{lic.product_name} has no {label.lower()}.", STATUS_TIMEOUT_MS
+            )
             return
-        self.clipboard_clear()
-        self.clipboard_append(value)
-        self.update()  # hand the data to the OS clipboard now
-        self.status_var.set(copied_message(label, lic))
+        QGuiApplication.clipboard().setText(value)
+        self.statusBar().showMessage(copied_message(label, lic), STATUS_TIMEOUT_MS)
 
     def _write[T](self, action: Callable[[], T]) -> tuple[bool, T | None]:
         """Run a store write and commit it; roll back on any failure.
 
         Returns (True, result), or (False, None) after showing a LicenceError
         (an expected refusal, e.g. a duplicate). Other errors propagate to
-        Tk's error reporting after the rollback.
+        the application's error reporting after the rollback.
         """
         try:
             result = action()
@@ -250,9 +343,11 @@ class KeyManagerApp(ttk.Frame):
         done = self._edit_loop("Add licence", None, lambda f: add_licence(self.con, f))
         if done:
             licence_id, fields = done
-            self.search_var.set("")  # make sure the new licence is visible
+            self.search.clear()  # make sure the new licence is visible
             self.refresh(select_id=licence_id)
-            self.status_var.set(f"Added licence for {fields.product_name}.")
+            self.statusBar().showMessage(
+                f"Added licence for {fields.product_name}.", STATUS_TIMEOUT_MS
+            )
 
     def edit(self) -> None:
         current = self.selected
@@ -267,7 +362,9 @@ class KeyManagerApp(ttk.Frame):
             licence_id, fields = done
             self.selected = None  # the id may have changed
             self.refresh(select_id=licence_id)
-            self.status_var.set(f"Saved licence for {fields.product_name}.")
+            self.statusBar().showMessage(
+                f"Saved licence for {fields.product_name}.", STATUS_TIMEOUT_MS
+            )
 
     def delete(self) -> None:
         current = self.selected
@@ -279,4 +376,6 @@ class KeyManagerApp(ttk.Frame):
         if ok:
             self.selected = None
             self.refresh()
-            self.status_var.set(f"Deleted licence for {current.product_name}.")
+            self.statusBar().showMessage(
+                f"Deleted licence for {current.product_name}.", STATUS_TIMEOUT_MS
+            )

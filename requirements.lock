@@ -10,7 +10,9 @@ mypy_extensions==1.1.0
 packaging==26.3
 pathspec==1.1.1
 pluggy==1.6.0
+PySide6_Essentials==6.11.2
 pytest==8.3.3
 ruff==0.16.8
+shiboken6==6.11.2
 sqlcipher3==0.6.2
 typing_extensions==4.16.0

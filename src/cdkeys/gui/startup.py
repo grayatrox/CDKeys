@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
-import tkinter as tk
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog, ttk
+
+from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from cdkeys.db import DBConn, WrongPassphraseError, ensure_schema, open_db
 from cdkeys.settings import SettingsError, load_settings, save_db_path
 
-DB_FILETYPES = [("SQLCipher database", "*.sqlite3 *.db"), ("All files", "*.*")]
+APP_NAME = "CD Key Manager"
+DB_FILTER = "SQLCipher database (*.sqlite3 *.db);;All files (*)"
 
 
 @dataclass(frozen=True)
@@ -50,100 +62,135 @@ def plan_startup(cli_value: str | None, settings_file: Path) -> Plan:
     return UseDatabase(path=path, create=not path.exists())
 
 
-def resolve_plan(root: tk.Misc, plan: Plan, settings_file: Path) -> UseDatabase | None:
+def resolve_plan(plan: Plan, settings_file: Path) -> UseDatabase | None:
     """Turn a plan into a database location, asking the user where needed.
 
     Returns None if the user cancels or startup cannot continue.
     """
     if isinstance(plan, StartupError):
-        messagebox.showerror("CD Key Manager", plan.message, parent=root)
+        QMessageBox.critical(None, APP_NAME, plan.message)
         return None
     if isinstance(plan, ChooseDatabase):
-        answer = messagebox.askyesnocancel(
-            "CD Key Manager",
-            "No database is configured yet.\n\n"
-            "Yes: open an existing database file.\n"
-            "No: create a new encrypted database.\n"
-            "Cancel: quit.",
-            parent=root,
+        box = QMessageBox()
+        box.setWindowTitle(APP_NAME)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText("No licence database is set up yet.")
+        box.setInformativeText(
+            "Open the database you already have, or create a new encrypted one."
         )
-        if answer is None:
+        open_button = box.addButton("Open existing…", QMessageBox.ButtonRole.AcceptRole)
+        create_button = box.addButton("Create new…", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is open_button:
+            chosen, _ = QFileDialog.getOpenFileName(
+                None, "Open licence database", "", DB_FILTER
+            )
+        elif clicked is create_button:
+            chosen, _ = QFileDialog.getSaveFileName(
+                None, "Create licence database", "cd_keys.sqlite3", DB_FILTER
+            )
+        else:
             return None
-        chosen = (
-            filedialog.askopenfilename(
-                parent=root, title="Open database", filetypes=DB_FILETYPES
-            )
-            if answer
-            else filedialog.asksaveasfilename(
-                parent=root,
-                title="Create database",
-                defaultextension=".sqlite3",
-                filetypes=DB_FILETYPES,
-            )
-        )
         if not chosen:
             return None
         save_db_path(settings_file, Path(chosen))
         return UseDatabase(path=Path(chosen), create=not Path(chosen).exists())
-    if plan.create and not messagebox.askyesno(
-        "CD Key Manager",
-        f"No database found at:\n{plan.path}\n\nCreate a new encrypted database there?",
-        parent=root,
-    ):
-        return None
+    if plan.create:
+        answer = QMessageBox.question(
+            None,
+            APP_NAME,
+            f"No database found at:\n{plan.path}\n\n"
+            "Create a new encrypted database there?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return None
     return plan
 
 
-class PassphraseDialog(simpledialog.Dialog):
+class PassphraseDialog(QDialog):
     """Masked passphrase entry; asks twice when creating a database."""
 
-    def __init__(self, parent: tk.Misc, db_path: Path, confirm: bool) -> None:
-        self.db_path = db_path
+    def __init__(
+        self, parent: QWidget | None, db_path: Path, confirm: bool, error: str = ""
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("New database" if confirm else "Unlock database")
+        self.setMinimumWidth(420)
         self.confirm = confirm
         self.passphrase: str | None = None
-        super().__init__(parent, "Unlock database" if not confirm else "New database")
 
-    def body(self, master: tk.Frame) -> tk.Widget:
-        ttk.Label(master, text=str(self.db_path)).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6)
+        path_label = QLabel(str(db_path))
+        path_label.setWordWrap(True)
+        path_label.setEnabled(False)
+        self.first = QLineEdit()
+        self.first.setEchoMode(QLineEdit.EchoMode.Password)
+        self.second = QLineEdit()
+        self.second.setEchoMode(QLineEdit.EchoMode.Password)
+        form = QFormLayout()
+        form.addRow("Passphrase", self.first)
+        if confirm:
+            form.addRow("Repeat", self.second)
+        self.problem = QLabel(error)
+        self.problem.setStyleSheet("color: #c42b1c;")
+        self.problem.setVisible(bool(error))
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        ttk.Label(master, text="Passphrase:").grid(row=1, column=0, sticky="w")
-        self.first = ttk.Entry(master, show="•", width=36)
-        self.first.grid(row=1, column=1, pady=2)
-        if self.confirm:
-            ttk.Label(master, text="Repeat:").grid(row=2, column=0, sticky="w")
-            self.second = ttk.Entry(master, show="•", width=36)
-            self.second.grid(row=2, column=1, pady=2)
-        return self.first
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            "Create" if confirm else "Unlock"
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
 
-    def validate(self) -> bool:
-        value = self.first.get()
+        layout = QVBoxLayout(self)
+        layout.addWidget(path_label)
+        layout.addLayout(form)
+        layout.addWidget(self.problem)
+        layout.addWidget(buttons)
+        self.first.setFocus()
+
+    def accept(self) -> None:
+        value = self.first.text()
         if not value:
-            messagebox.showwarning("Passphrase", "Enter a passphrase.", parent=self)
-            return False
-        if self.confirm and self.second.get() != value:
-            messagebox.showwarning(
-                "Passphrase", "The passphrases do not match.", parent=self
-            )
-            return False
-        return True
+            self._problem("Enter a passphrase.")
+            return
+        if self.confirm and self.second.text() != value:
+            self._problem("The passphrases do not match.")
+            return
+        self.passphrase = value
+        super().accept()
 
-    def apply(self) -> None:
-        self.passphrase = self.first.get()
+    def _problem(self, text: str) -> None:
+        self.problem.setText(text)
+        self.problem.show()
 
 
-def unlock(root: tk.Misc, target: UseDatabase) -> DBConn | None:
+AskPassphrase = Callable[[Path, bool, str], str | None]
+
+
+def ask_passphrase(db_path: Path, confirm: bool, error: str) -> str | None:
+    dialog = PassphraseDialog(None, db_path, confirm, error)
+    dialog.exec()
+    return dialog.passphrase
+
+
+def unlock(
+    target: UseDatabase,
+    ask: AskPassphrase = ask_passphrase,
+) -> DBConn | None:
     """Ask for the passphrase until the database opens; None if cancelled."""
+    error = ""
     while True:
-        dialog = PassphraseDialog(root, target.path, confirm=target.create)
-        if dialog.passphrase is None:
+        passphrase = ask(target.path, target.create, error)
+        if passphrase is None:
             return None
         try:
-            con = open_db(target.path, dialog.passphrase, create=target.create)
+            con = open_db(target.path, passphrase, create=target.create)
         except WrongPassphraseError:
-            messagebox.showerror(
-                "Unlock database", "Wrong passphrase. Try again.", parent=root
-            )
+            error = "Wrong passphrase. Try again."
             continue
         ensure_schema(con)
         con.commit()

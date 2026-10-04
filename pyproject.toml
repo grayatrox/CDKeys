@@ -10,6 +10,7 @@ version = "0.1.0"
 description = "Encrypted (SQLCipher) store for software licence keys"
 requires-python = ">=3.12"
 dependencies = [
+    "PySide6-Essentials==6.11.2",
     "sqlcipher3==0.6.2",
 ]
 
@@ -38,7 +39,8 @@ where = ["src"]
 testpaths = ["tests"]
 # tasks.py and launch.py are repo-root scripts, not part of the package.
 pythonpath = ["."]
-# pytest's default fd-level capture redirects the process's stdio handles,
+# For the stdlib (Tcl/Tk) setup window in launch.py: pytest's default fd-level
+# capture redirects the process's stdio handles,
 # and with it Tcl intermittently fails to read its own init.tcl / ttk scripts
 # on Windows ("couldn't read file ... No error"), erroring random GUI tests.
 # sys-level capture still captures all Python output; 0 failures in repeat

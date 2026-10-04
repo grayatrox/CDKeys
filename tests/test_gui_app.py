@@ -1,16 +1,20 @@
-"""Smoke tests driving the real Tk main window against an in-memory DB."""
+"""Behaviour tests driving the real Qt main window against an in-memory DB."""
 
-import tkinter as tk
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 import sqlcipher3
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import QLineEdit, QWidget
 
 from cdkeys.db import DBConn, ensure_schema
-from cdkeys.gui.app import KeyManagerApp
+from cdkeys.gui.app import KeyManagerWindow
 from cdkeys.gui.format import MASK
 from cdkeys.store import LicenceFields, add_licence
+
+pytestmark = pytest.mark.usefixtures("qapp")
 
 
 @pytest.fixture
@@ -38,255 +42,286 @@ def con() -> Iterator[DBConn]:
     c.close()
 
 
-@pytest.fixture
-def root(con: DBConn) -> Iterator[tk.Tk]:
-    # Depends on con so the window is torn down while the DB is still open.
-    r = tk.Tk()
-    r.withdraw()
-    # Copy tests use the real system clipboard; put back what was there.
-    try:
-        saved: str | None = r.clipboard_get()
-    except tk.TclError:  # clipboard empty or not text
-        saved = None
-    yield r
-    r.clipboard_clear()
-    if saved is not None:
-        r.clipboard_append(saved)
-        r.update()
-    r.destroy()
-
-
-def _app(root: tk.Tk, con: DBConn) -> KeyManagerApp:
-    app = KeyManagerApp(root, con, Path("test.sqlite3"))
-    root.update()
-    return app
-
-
-def _products(app: KeyManagerApp) -> list[str]:
-    return [app.tree.set(iid, "product") for iid in app.tree.get_children()]
-
-
-def test_lists_licences_sorted_with_masked_keys(root: tk.Tk, con: DBConn) -> None:
-    app = _app(root, con)
-
-    assert _products(app) == ["Game", "Office"]
-    office = app.tree.get_children()[1]
-    assert app.tree.set(office, "key") == MASK * 13 + "CCCC"
-
-
-def test_search_filters_rows(root: tk.Tk, con: DBConn) -> None:
-    app = _app(root, con)
-
-    app.search_var.set("LAPTOP")
-    root.update()
-    assert _products(app) == ["Office"]
-
-    app.search_var.set("")
-    root.update()
-    assert _products(app) == ["Game", "Office"]
-
-
-def test_selecting_a_row_fills_details(root: tk.Tk, con: DBConn) -> None:
-    app = _app(root, con)
-
-    app.tree.selection_set(app.tree.get_children()[1])
-    root.update()
-
-    assert app.detail_vars["product_name"].get() == "Office"
-    assert app.detail_vars["product_key"].get() == "AAAAA-BBBBB-CCCCC"
-    assert app.detail_entries["product_key"].cget("show") == MASK
-
-
-def test_show_toggle_reveals_secrets(root: tk.Tk, con: DBConn) -> None:
-    app = _app(root, con)
-
-    app.show_secrets.set(True)
-    app._apply_secret_visibility()
-
-    assert app.detail_entries["product_key"].cget("show") == ""
-    assert app.detail_entries["serial_number"].cget("show") == ""
-
-
-def test_copy_puts_value_on_clipboard_without_echoing_it(
-    root: tk.Tk, con: DBConn
-) -> None:
-    app = _app(root, con)
-    app.tree.selection_set(app.tree.get_children()[1])
-    root.update()
-
-    app.copy_field("product_key", "Product key")
-
-    assert root.clipboard_get() == "AAAAA-BBBBB-CCCCC"
-    assert "AAAAA" not in app.status_var.get()
-    assert "product key" in app.status_var.get()
-
-
-def test_copy_reports_empty_field_and_no_selection(root: tk.Tk, con: DBConn) -> None:
-    app = _app(root, con)
-
-    app.copy_field("product_key", "Product key")
-    assert app.status_var.get() == "Select a licence first."
-
-    app.tree.selection_set(app.tree.get_children()[0])  # Game: no key
-    root.update()
-    app.copy_field("product_key", "Product key")
-    assert app.status_var.get() == "Game has no product key."
-
-
 class Scripted:
     """Stands in for the modal dialogs, answering from queues."""
 
     def __init__(
-        self,
-        answers: list[LicenceFields | None],
-        confirm: bool = True,
+        self, answers: list[LicenceFields | None] | None = None, confirm: bool = True
     ) -> None:
-        self.answers = answers
+        self.answers = answers or []
         self.confirm_answer = confirm
         self.asked: list[tuple[str, LicenceFields | None]] = []
         self.errors: list[str] = []
         self.confirms: list[str] = []
 
     def ask(
-        self, _parent: tk.Misc, title: str, initial: LicenceFields | None
+        self, _parent: QWidget | None, title: str, initial: LicenceFields | None
     ) -> LicenceFields | None:
         self.asked.append((title, initial))
         return self.answers.pop(0)
 
-    def confirm(self, _parent: tk.Misc, message: str) -> bool:
+    def confirm(self, _parent: QWidget, message: str) -> bool:
         self.confirms.append(message)
         return self.confirm_answer
 
-    def show_error(self, _parent: tk.Misc, message: str) -> None:
+    def show_error(self, _parent: QWidget, message: str) -> None:
         self.errors.append(message)
 
 
-def _scripted_app(root: tk.Tk, con: DBConn, script: Scripted) -> KeyManagerApp:
-    app = KeyManagerApp(
-        root,
-        con,
-        Path("test.sqlite3"),
-        ask=script.ask,
-        confirm=script.confirm,
-        show_error=script.show_error,
-    )
-    root.update()
-    return app
+WindowFactory = Callable[[Scripted], KeyManagerWindow]
 
 
-def _select(app: KeyManagerApp, product: str) -> None:
-    for iid in app.tree.get_children():
-        if app.tree.set(iid, "product") == product:
-            app.tree.selection_set(iid)
-            app.update()
+@pytest.fixture
+def make_window(con: DBConn) -> Iterator[WindowFactory]:
+    windows: list[KeyManagerWindow] = []
+
+    def make(script: Scripted) -> KeyManagerWindow:
+        window = KeyManagerWindow(
+            con,
+            Path("test.sqlite3"),
+            ask=script.ask,
+            confirm=script.confirm,
+            show_error=script.show_error,
+        )
+        windows.append(window)
+        return window
+
+    yield make
+    # Close windows while the DB is still open (con is torn down after this).
+    for window in windows:
+        window.close()
+        window.deleteLater()
+
+
+def _products(window: KeyManagerWindow) -> list[str]:
+    proxy = window.proxy
+    return [str(proxy.index(r, 0).data()) for r in range(proxy.rowCount())]
+
+
+def _cell(window: KeyManagerWindow, product: str, column: int) -> str:
+    proxy = window.proxy
+    for r in range(proxy.rowCount()):
+        if proxy.index(r, 0).data() == product:
+            return str(proxy.index(r, column).data())
+    raise AssertionError(f"{product} not listed")
+
+
+def _select(window: KeyManagerWindow, product: str) -> None:
+    proxy = window.proxy
+    for r in range(proxy.rowCount()):
+        if proxy.index(r, 0).data() == product:
+            window.table.selectRow(r)
             return
     raise AssertionError(f"{product} not listed")
 
 
-def test_edit_and_delete_disabled_until_a_row_is_selected(
-    root: tk.Tk, con: DBConn
+def _field(window: KeyManagerWindow, name: str) -> str:
+    field = window.fields[name]
+    return field.text() if isinstance(field, QLineEdit) else field.toPlainText()
+
+
+def _rows(con: DBConn) -> object:
+    return con.execute("SELECT COUNT(*) FROM license").fetchone()
+
+
+# --- listing, search, details, copy -----------------------------------------
+
+
+def test_lists_licences_sorted_with_masked_keys(make_window: WindowFactory) -> None:
+    window = make_window(Scripted())
+
+    assert _products(window) == ["Game", "Office"]
+    assert _cell(window, "Office", 1) == MASK * 6 + "CCCC"
+
+
+def test_sorting_by_a_column_reorders_rows(make_window: WindowFactory) -> None:
+    window = make_window(Scripted())
+
+    window.table.sortByColumn(0, Qt.SortOrder.DescendingOrder)
+    assert _products(window) == ["Office", "Game"]
+
+    window.table.sortByColumn(2, Qt.SortOrder.AscendingOrder)  # device
+    assert _products(window) == ["Game", "Office"]  # "" sorts before "laptop"
+
+
+def test_search_filters_rows(make_window: WindowFactory) -> None:
+    window = make_window(Scripted())
+
+    window.search.setText("LAPTOP")
+    assert _products(window) == ["Office"]
+
+    window.search.clear()
+    assert _products(window) == ["Game", "Office"]
+
+
+def test_selecting_a_row_fills_details_with_secrets_hidden(
+    make_window: WindowFactory,
 ) -> None:
-    app = _scripted_app(root, con, Scripted([]))
+    window = make_window(Scripted())
 
-    assert str(app.edit_button.cget("state")) == "disabled"
-    _select(app, "Office")
-    assert str(app.edit_button.cget("state")) == "normal"
-    assert str(app.delete_button.cget("state")) == "normal"
+    _select(window, "Office")
+
+    assert _field(window, "product_name") == "Office"
+    assert _field(window, "product_key") == "AAAAA-BBBBB-CCCCC"
+    key_field = window.fields["product_key"]
+    assert isinstance(key_field, QLineEdit)
+    assert key_field.echoMode() == QLineEdit.EchoMode.Password
 
 
-def test_add_saves_selects_and_clears_search(root: tk.Tk, con: DBConn) -> None:
-    script = Scripted([LicenceFields(product_name="Windows", product_key="W1")])
-    app = _scripted_app(root, con, script)
-    app.search_var.set("office")
-    root.update()
+def test_show_toggle_reveals_secrets(make_window: WindowFactory) -> None:
+    window = make_window(Scripted())
 
-    app.add()
+    window.show_secrets.setChecked(True)
 
-    assert app.search_var.get() == ""
-    assert _products(app) == ["Game", "Office", "Windows"]
-    assert app.detail_vars["product_name"].get() == "Windows"
-    assert app.status_var.get() == "Added licence for Windows."
-    assert con.execute("SELECT COUNT(*) FROM license").fetchone() == (3,)
+    for name in ("product_key", "serial_number"):
+        field = window.fields[name]
+        assert isinstance(field, QLineEdit)
+        assert field.echoMode() == QLineEdit.EchoMode.Normal
+
+
+def test_copy_puts_value_on_clipboard_without_echoing_it(
+    make_window: WindowFactory,
+) -> None:
+    window = make_window(Scripted())
+    _select(window, "Office")
+
+    window.copy_field("product_key", "Product key")
+
+    assert QGuiApplication.clipboard().text() == "AAAAA-BBBBB-CCCCC"
+    assert "AAAAA" not in window.status()
+    assert "product key" in window.status()
+
+
+def test_copy_reports_empty_field_and_no_selection(make_window: WindowFactory) -> None:
+    window = make_window(Scripted())
+
+    window.copy_field("product_key", "Product key")
+    assert window.status() == "Select a licence first."
+
+    _select(window, "Game")  # no key
+    window.copy_field("product_key", "Product key")
+    assert window.status() == "Game has no product key."
+
+
+# --- add / edit / delete ------------------------------------------------------
+
+
+def test_edit_and_delete_disabled_until_a_row_is_selected(
+    make_window: WindowFactory,
+) -> None:
+    window = make_window(Scripted())
+
+    assert not window.edit_action.isEnabled()
+    _select(window, "Office")
+    assert window.edit_action.isEnabled()
+    assert window.delete_action.isEnabled()
+
+
+def test_add_saves_selects_and_clears_search(
+    make_window: WindowFactory, con: DBConn
+) -> None:
+    window = make_window(
+        Scripted([LicenceFields(product_name="Windows", product_key="W1")])
+    )
+    window.search.setText("office")
+
+    window.add()
+
+    assert window.search.text() == ""
+    assert _products(window) == ["Game", "Office", "Windows"]
+    assert _field(window, "product_name") == "Windows"
+    assert window.status() == "Added licence for Windows."
+    assert _rows(con) == (3,)
 
 
 def test_add_duplicate_shows_error_and_reopens_with_input(
-    root: tk.Tk, con: DBConn
+    make_window: WindowFactory,
 ) -> None:
     duplicate = LicenceFields(product_name="office", product_key="AAAAA-BBBBB-CCCCC")
     script = Scripted([duplicate, None])
-    app = _scripted_app(root, con, script)
+    window = make_window(script)
 
-    app.add()
+    window.add()
 
     assert len(script.errors) == 1
     assert "already stored" in script.errors[0]
     assert script.asked[1] == ("Add licence", duplicate)  # input kept
-    assert _products(app) == ["Game", "Office"]
+    assert _products(window) == ["Game", "Office"]
 
 
-def test_add_cancelled_changes_nothing(root: tk.Tk, con: DBConn) -> None:
-    app = _scripted_app(root, con, Scripted([None]))
+def test_add_cancelled_changes_nothing(make_window: WindowFactory) -> None:
+    window = make_window(Scripted([None]))
 
-    app.add()
+    window.add()
 
-    assert _products(app) == ["Game", "Office"]
+    assert _products(window) == ["Game", "Office"]
 
 
-def test_edit_prefills_saves_and_keeps_selection(root: tk.Tk, con: DBConn) -> None:
+def test_edit_prefills_saves_and_keeps_selection(make_window: WindowFactory) -> None:
     edited = LicenceFields(
         product_name="Office",
         product_key="AAAAA-BBBBB-DDDDD",
         assigned_device="desktop",
     )
     script = Scripted([edited])
-    app = _scripted_app(root, con, script)
-    _select(app, "Office")
+    window = make_window(script)
+    _select(window, "Office")
 
-    app.edit()
+    window.edit()
 
     title, initial = script.asked[0]
     assert title == "Edit licence"
     assert initial is not None and initial.product_key == "AAAAA-BBBBB-CCCCC"
-    assert app.detail_vars["product_key"].get() == "AAAAA-BBBBB-DDDDD"
-    assert app.detail_vars["assigned_device"].get() == "desktop"
-    assert app.status_var.get() == "Saved licence for Office."
+    assert _field(window, "product_key") == "AAAAA-BBBBB-DDDDD"
+    assert _field(window, "assigned_device") == "desktop"
+    assert window.status() == "Saved licence for Office."
 
 
-def test_edit_collision_shows_error_and_rolls_back(root: tk.Tk, con: DBConn) -> None:
+def test_edit_collision_shows_error_and_rolls_back(make_window: WindowFactory) -> None:
     clash = LicenceFields(
         product_name="Game", serial_number="SN-1", associated_login="me@x.com"
     )
     script = Scripted([clash, None])
-    app = _scripted_app(root, con, script)
-    _select(app, "Office")
+    window = make_window(script)
+    _select(window, "Office")
 
-    app.edit()
+    window.edit()
 
     assert len(script.errors) == 1
     assert "another stored licence" in script.errors[0]
-    assert _products(app) == ["Game", "Office"]
-    assert app.detail_vars["product_key"].get() == "AAAAA-BBBBB-CCCCC"
+    assert _products(window) == ["Game", "Office"]
+    assert _field(window, "product_key") == "AAAAA-BBBBB-CCCCC"
 
 
 def test_delete_confirms_without_showing_key_then_removes(
-    root: tk.Tk, con: DBConn
+    make_window: WindowFactory,
 ) -> None:
-    script = Scripted([], confirm=True)
-    app = _scripted_app(root, con, script)
-    _select(app, "Office")
+    script = Scripted(confirm=True)
+    window = make_window(script)
+    _select(window, "Office")
 
-    app.delete()
+    window.delete()
 
     assert script.confirms == ["Delete the licence for Office?"]
-    assert _products(app) == ["Game"]
-    assert app.selected is None
-    assert app.status_var.get() == "Deleted licence for Office."
+    assert _products(window) == ["Game"]
+    assert window.selected is None
+    assert window.status() == "Deleted licence for Office."
 
 
-def test_delete_declined_keeps_licence(root: tk.Tk, con: DBConn) -> None:
-    app = _scripted_app(root, con, Scripted([], confirm=False))
-    _select(app, "Office")
+def test_delete_declined_keeps_licence(make_window: WindowFactory) -> None:
+    window = make_window(Scripted(confirm=False))
+    _select(window, "Office")
 
-    app.delete()
+    window.delete()
 
-    assert _products(app) == ["Game", "Office"]
+    assert _products(window) == ["Game", "Office"]
+
+
+def test_double_click_opens_edit(make_window: WindowFactory) -> None:
+    script = Scripted([None])
+    window = make_window(script)
+    _select(window, "Office")
+
+    window.table.doubleClicked.emit(window.proxy.index(1, 0))
+
+    assert script.asked and script.asked[0][0] == "Edit licence"

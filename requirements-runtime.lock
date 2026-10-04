@@ -1,3 +1,5 @@
 # Runtime dependencies only (what launch.py installs on first start).
-# Must agree with requirements.lock; sqlcipher3 has no dependencies of its own.
+# Must agree with requirements.lock. shiboken6 is PySide6's only dependency.
+PySide6-Essentials==6.11.2
+shiboken6==6.11.2
 sqlcipher3==0.6.2
