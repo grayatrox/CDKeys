@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import re
+import shutil
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -51,7 +55,33 @@ CREATE INDEX IF NOT EXISTS idx_license_assigned_device
 
 CREATE INDEX IF NOT EXISTS idx_license_associated_login
     ON license(associated_login);
+
+-- Product groups (#653): named tags on products. A product can be in any
+-- number of groups, and a group can sit inside another (parent_id). Names
+-- are unique ignoring case; cdkeys.groups also compares them with canon().
+CREATE TABLE IF NOT EXISTS product_group (
+    id        INTEGER PRIMARY KEY,
+    name      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    parent_id INTEGER REFERENCES product_group(id)
+);
+
+-- CASCADE on product matters: the store deletes a product when its last
+-- licence goes, and that must not be blocked by (or leave behind) a tag.
+CREATE TABLE IF NOT EXISTS product_group_member (
+    group_id   INTEGER NOT NULL REFERENCES product_group(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES product(id) ON DELETE CASCADE,
+    PRIMARY KEY (group_id, product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_group_parent_id
+    ON product_group(parent_id);
+
+CREATE INDEX IF NOT EXISTS idx_product_group_member_product_id
+    ON product_group_member(product_id);
 """
+
+# Every table SCHEMA_SQL creates, so needs_migration cannot drift from it.
+SCHEMA_TABLES = frozenset(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", SCHEMA_SQL))
 
 
 class DBCursor(Protocol):
@@ -112,6 +142,39 @@ def open_db(db_path: Path, passphrase: str, *, create: bool = False) -> DBConn:
         raise
 
     return con
+
+
+def needs_migration(con: DBConn) -> bool:
+    """Whether ensure_schema would change this database's schema.
+
+    Used to take a backup before an existing database is migrated.
+    """
+    rows = con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    tables = {row[0] for row in rows.fetchall()}
+    if not SCHEMA_TABLES <= tables:
+        return True
+    columns = {row[1] for row in con.execute("PRAGMA table_info(license)").fetchall()}
+    return "identity" not in columns
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def backup_db(db_path: Path, now: Callable[[], datetime] = _utc_now) -> Path:
+    """Copy the database file next to itself; returns the copy's path.
+
+    The copy is named ``<file name>.<UTC timestamp>.bak`` so the user can
+    restore it by hand by renaming it back. It stays encrypted (a byte copy
+    of the file) and ``*.bak`` is git-ignored. An existing file of the same
+    name is never overwritten (FileExistsError).
+    """
+    stamp = now().astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    target = db_path.with_name(f"{db_path.name}.{stamp}.bak")
+    with db_path.open("rb") as src, target.open("xb") as dst:
+        shutil.copyfileobj(src, dst)
+    shutil.copystat(db_path, target)
+    return target
 
 
 def ensure_schema(con: DBConn) -> None:

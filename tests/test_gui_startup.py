@@ -12,6 +12,7 @@ from cdkeys.gui.startup import (
     plan_startup,
     unlock,
 )
+from cdkeys.licenses import upsert_license
 from cdkeys.settings import save_db_path
 
 
@@ -154,3 +155,115 @@ def test_passphrase_dialog_shows_a_previous_error() -> None:
 
     assert dialog.problem.text() == "Wrong passphrase. Try again."
     assert not dialog.problem.isHidden()
+
+
+# --- backup before migrating (#653) -------------------------------------------
+
+
+def _pre_groups_db(path: Path, passphrase: str) -> list[tuple[str, str]]:
+    """An encrypted DB in the pre-groups layout; returns its (id, product) rows."""
+    con = open_db(path, passphrase, create=True)
+    ensure_schema(con)
+    upsert_license(con, product_name="Office", product_key="AAAAA")
+    upsert_license(con, product_name="Game", serial_number="SN-1")
+    con.execute("DROP TABLE product_group_member")
+    con.execute("DROP TABLE product_group")
+    con.commit()
+    rows = con.execute(
+        "SELECT l.id, p.name FROM license l JOIN product p ON p.id = l.product_id "
+        "ORDER BY l.id"
+    ).fetchall()
+    con.close()
+    return [(str(i), str(n)) for i, n in rows]
+
+
+class RecordingBackup:
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.copies: list[tuple[Path, bytes]] = []
+
+    def __call__(self, path: Path) -> Path:
+        if self.fail:
+            raise PermissionError("read-only folder")
+        self.copies.append((path, path.read_bytes()))
+        return path.with_name(path.name + ".bak")
+
+
+def test_unlock_backs_up_old_db_before_migrating(tmp_path: Path) -> None:
+    db = tmp_path / "keys.sqlite3"
+    before = _pre_groups_db(db, "pw")
+    original = db.read_bytes()
+    backup = RecordingBackup()
+
+    con = unlock(
+        UseDatabase(db, create=False), ask=ScriptedPrompt(["pw"]), backup=backup
+    )
+
+    assert con is not None
+    assert backup.copies == [(db, original)]  # taken before any change
+    rows = con.execute(
+        "SELECT l.id, p.name FROM license l JOIN product p ON p.id = l.product_id "
+        "ORDER BY l.id"
+    ).fetchall()
+    grouped = con.execute("SELECT count(*) FROM product_group_member").fetchone()
+    con.close()
+    assert [(str(i), str(n)) for i, n in rows] == before  # ids unchanged
+    assert grouped == (0,)  # every product starts ungrouped
+
+
+def test_unlock_real_backup_lands_next_to_the_db(tmp_path: Path) -> None:
+    db = tmp_path / "keys.sqlite3"
+    _pre_groups_db(db, "pw")
+    original = db.read_bytes()
+
+    con = unlock(UseDatabase(db, create=False), ask=ScriptedPrompt(["pw"]))
+
+    assert con is not None
+    con.close()
+    backups = list(tmp_path.glob("keys.sqlite3.*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+
+
+def test_unlock_does_not_migrate_when_backup_fails(tmp_path: Path) -> None:
+    db = tmp_path / "keys.sqlite3"
+    _pre_groups_db(db, "pw")
+    original = db.read_bytes()
+
+    with pytest.raises(PermissionError):
+        unlock(
+            UseDatabase(db, create=False),
+            ask=ScriptedPrompt(["pw"]),
+            backup=RecordingBackup(fail=True),
+        )
+
+    assert db.read_bytes() == original
+    db.unlink()  # the connection was closed (Windows blocks deleting it)
+
+
+def test_unlock_skips_backup_when_schema_is_current(tmp_path: Path) -> None:
+    db = tmp_path / "keys.sqlite3"
+    _existing_db(db, "pw")
+    backup = RecordingBackup()
+
+    con = unlock(
+        UseDatabase(db, create=False), ask=ScriptedPrompt(["pw"]), backup=backup
+    )
+
+    assert con is not None
+    con.close()
+    assert backup.copies == []
+
+
+def test_unlock_skips_backup_for_a_new_db(tmp_path: Path) -> None:
+    backup = RecordingBackup()
+
+    con = unlock(
+        UseDatabase(tmp_path / "new.sqlite3", create=True),
+        ask=ScriptedPrompt(["pw"]),
+        backup=backup,
+    )
+
+    assert con is not None
+    con.close()
+    assert backup.copies == []

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,11 +19,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from cdkeys.db import DBConn, WrongPassphraseError, ensure_schema, open_db
+from cdkeys.db import (
+    DBConn,
+    WrongPassphraseError,
+    backup_db,
+    ensure_schema,
+    needs_migration,
+    open_db,
+)
 from cdkeys.settings import SettingsError, load_settings, save_db_path
 
 APP_NAME = "CD Key Manager"
 DB_FILTER = "SQLCipher database (*.sqlite3 *.db);;All files (*)"
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -180,8 +190,14 @@ def ask_passphrase(db_path: Path, confirm: bool, error: str) -> str | None:
 def unlock(
     target: UseDatabase,
     ask: AskPassphrase = ask_passphrase,
+    backup: Callable[[Path], Path] = backup_db,
 ) -> DBConn | None:
-    """Ask for the passphrase until the database opens; None if cancelled."""
+    """Ask for the passphrase until the database opens; None if cancelled.
+
+    An existing database whose schema is out of date is copied with
+    ``backup`` before it is migrated; if the copy fails, nothing is migrated
+    and the error propagates.
+    """
     error = ""
     while True:
         passphrase = ask(target.path, target.create, error)
@@ -192,6 +208,13 @@ def unlock(
         except WrongPassphraseError:
             error = "Wrong passphrase. Try again."
             continue
+        try:
+            if not target.create and needs_migration(con):
+                copy = backup(target.path)
+                log.info("Backed up %s to %s before migrating it", target.path, copy)
+        except BaseException:
+            con.close()
+            raise
         ensure_schema(con)
         con.commit()
         return con

@@ -53,6 +53,14 @@ On first start it asks whether to open an existing database or create a new
 one, and saves the choice to the settings file (see [Configure](#configure)).
 It then asks for the passphrase; a new database asks for it twice.
 
+When a newer version needs to change an existing database's layout (for
+example to add product groups), the key manager first copies the database to
+`<file name>.<UTC time>.bak` in the same folder, e.g.
+`cd_keys.sqlite3.20261004T053001Z.bak`, and only then updates it. To go back,
+close the key manager and rename the copy to the original name. The copy is
+still encrypted with the same passphrase. If the copy cannot be made, the
+database is left unchanged and an error is shown.
+
 The window uses the Windows 11 look and follows your light or dark mode.
 
 - **Search** filters as you type, across every field. Click a column heading
